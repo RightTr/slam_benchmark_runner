@@ -1,0 +1,69 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Enabled: true
+  Displays:
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+    - Class: rviz_default_plugins/Path
+      Name: Camera Path
+      Topic: /orbslam3/path
+      Enabled: true
+      Line Style: Lines
+      Line Width: 0.03
+      Color: 25; 220; 80
+    - Class: rviz_default_plugins/Pose
+      Name: Camera Pose
+      Topic: /orbslam3/pose
+      Enabled: true
+    - Class: rviz_default_plugins/PointCloud2
+      Name: ORB Map Points
+      Topic: /orbslam3/map_points
+      Enabled: true
+      Style: Points
+      Size (Pixels): 3
+      Color Transformer: FlatColor
+      Flat Color: 255; 230; 80
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Keyframes and Covisibility
+      Marker Topic: /orbslam3/keyframes
+      Enabled: true
+    - Class: rviz_default_plugins/Image
+      Name: Tracked Image
+      Topic: /orbslam3/tracked_image
+      Enabled: true
+    - Class: rviz_default_plugins/Grid
+      Name: Ground Grid
+      Enabled: true
+      Plane: XY
+      Cell Size: 1
+      Color: 110; 110; 120
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: map
+  Name: ORB-SLAM3
+  Frame Rate: 20
+  Tools:
+    - Class: rviz_default_plugins/Interact
+      Hide Inactive Objects: true
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+    - Class: rviz_default_plugins/SetInitialPose
+    - Class: rviz_default_plugins/SetGoal
+    - Class: rviz_default_plugins/PublishPoint
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 3
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 0.5
+      Pitch: 0.55
+      Yaw: 0.8
+    Saved: ~

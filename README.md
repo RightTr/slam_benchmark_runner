@@ -1,6 +1,6 @@
 # 🧭 SLAM-Bench Runner
 
-SLAM-Bench is the offline RGB-D benchmark for the **Robot Vision and Navigation** course assignment. Run your own ORB-SLAM3 ROS 2 node on your computer, then use the benchmark console to play a sequence and view trajectory accuracy. You may change the SLAM algorithm; keep the ROS 2 interface compatible.
+SLAM-Bench Runner is the offline RGB-D benchmark for the **Robot Vision and Navigation** course assignment. Run your own ORB-SLAM3 ROS 2 node on your computer, then use the benchmark console to play a sequence and view trajectory accuracy. You may change the SLAM algorithm; keep the ROS 2 interface compatible.
 
 ## 📦 What is included
 
@@ -11,7 +11,31 @@ SLAM-Bench is the offline RGB-D benchmark for the **Robot Vision and Navigation*
 
 ## ▶️ Run
 
-1. Start your ORB-SLAM3 ROS 2 RGB-D node in one terminal. It must subscribe to `/benchmark/rgb`, `/benchmark/depth`, and `/benchmark/camera_info`, and respond to `/benchmark/control`.
+### Build ORB-SLAM3
+
+The ROS 2 RGB-D wrapper is included in `ORB_SLAM3/Examples_ROS`. It reuses the `slam_bench_msgs` package in this repository; there is one shared definition of the benchmark control messages.
+
+Build the native ORB-SLAM3 library and ROS 2 wrapper from the workspace:
+
+```bash
+cd ORB_SLAM3
+./build_ros.sh
+```
+
+### Start a run
+
+1. Start the student ORB-SLAM3 node in one terminal:
+
+   ```bash
+   cd /home/right/slambr_ws
+   source /opt/ros/humble/setup.bash
+   source /home/right/slambr_ws/install/setup.bash
+   ros2 launch orb_slam3 rgbd.launch.py \
+     vocabulary:=src/slam_benchmark_runner/ORB_SLAM3/Vocabulary/ORBvoc.txt
+   ```
+
+   The wrapper subscribes to `/benchmark/rgb`, `/benchmark/depth`, and `/benchmark/camera_info`; it handles `/benchmark/control` and publishes the final camera trajectory on `/benchmark/trajectory_final`.
+
 2. Start the benchmark in another terminal:
 
    ```bash
