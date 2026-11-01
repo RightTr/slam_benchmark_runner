@@ -38,21 +38,19 @@ Atlas::Atlas(int initKFid): mnLastInitKFidMap(initKFid), mHasViewer(false)
 
 Atlas::~Atlas()
 {
-    for(std::set<Map*>::iterator it = mspMaps.begin(), end = mspMaps.end(); it != end;)
-    {
-        Map* pMi = *it;
+    std::set<Map*> maps=mspMaps;
+    maps.insert(mspBadMaps.begin(),mspBadMaps.end());
+    maps.insert(mspRetiredMaps.begin(),mspRetiredMaps.end());
+    maps.insert(mvpBackupMaps.begin(),mvpBackupMaps.end());
+    for(Map* map:maps) delete map;
+    mspMaps.clear();
+    mspBadMaps.clear();
+    mspRetiredMaps.clear();
+    mvpBackupMaps.clear();
 
-        if(pMi)
-        {
-            delete pMi;
-            pMi = static_cast<Map*>(NULL);
-
-            it = mspMaps.erase(it);
-        }
-        else
-            ++it;
-
-    }
+    std::set<GeometricCamera*> cameras(mvpCameras.begin(),mvpCameras.end());
+    for(GeometricCamera* camera:cameras) delete camera;
+    mvpCameras.clear();
 }
 
 void Atlas::CreateNewMap()
@@ -241,7 +239,10 @@ void Atlas::clearAtlas()
         (*it)->clear();
         delete *it;
     }*/
+    mspRetiredMaps.insert(mspMaps.begin(),mspMaps.end());
+    mspRetiredMaps.insert(mspBadMaps.begin(),mspBadMaps.end());
     mspMaps.clear();
+    mspBadMaps.clear();
     mpCurrentMap = static_cast<Map*>(NULL);
     mnLastInitKFidMap = 0;
 }
@@ -267,11 +268,7 @@ void Atlas::SetMapBad(Map* pMap)
 
 void Atlas::RemoveBadMaps()
 {
-    /*for(Map* pMap : mspBadMaps)
-    {
-        delete pMap;
-        pMap = static_cast<Map*>(NULL);
-    }*/
+    mspRetiredMaps.insert(mspBadMaps.begin(),mspBadMaps.end());
     mspBadMaps.clear();
 }
 

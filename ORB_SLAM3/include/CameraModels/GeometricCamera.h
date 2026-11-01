@@ -56,7 +56,7 @@ namespace ORB_SLAM3 {
     public:
         GeometricCamera() {}
         GeometricCamera(const std::vector<float> &_vParameters) : mvParameters(_vParameters) {}
-        ~GeometricCamera() {}
+        virtual ~GeometricCamera() = default;
 
         virtual cv::Point2f project(const cv::Point3f &p3D) = 0;
         virtual Eigen::Vector2d project(const Eigen::Vector3d & v3D) = 0;

@@ -68,6 +68,7 @@ public:
 
     // This function will run in a separate thread
     void RunGlobalBundleAdjustment(Map* pActiveMap, unsigned long nLoopKF);
+    void StopGlobalBundleAdjustment();
 
     bool isRunningGBA(){
         unique_lock<std::mutex> lock(mMutexGBA);
@@ -79,6 +80,7 @@ public:
     }   
 
     void RequestFinish();
+    void JoinGBAThread();
 
     bool isFinished();
 

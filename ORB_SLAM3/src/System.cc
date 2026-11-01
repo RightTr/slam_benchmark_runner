@@ -20,6 +20,15 @@
 
 #include "System.h"
 #include "Converter.h"
+#include "Atlas.h"
+#include "Tracking.h"
+#include "LocalMapping.h"
+#include "LoopClosing.h"
+#include "Viewer.h"
+#include "FrameDrawer.h"
+#include "MapDrawer.h"
+#include "KeyFrameDatabase.h"
+#include "Settings.h"
 #include <thread>
 #include <pangolin/pangolin.h>
 #include <iomanip>
@@ -40,8 +49,12 @@ Verbose::eLevel Verbose::th = Verbose::VERBOSITY_NORMAL;
 
 System::System(const string &strVocFile, const string &strSettingsFile, const eSensor sensor,
                const bool bUseViewer, const int initFr, const string &strSequence):
-    mSensor(sensor), mpViewer(static_cast<Viewer*>(NULL)), mbReset(false), mbResetActiveMap(false),
-    mbActivateLocalizationMode(false), mbDeactivateLocalizationMode(false), mbShutDown(false)
+    mSensor(sensor), mpVocabulary(nullptr), mpKeyFrameDatabase(nullptr), mpAtlas(nullptr),
+    mpTracker(nullptr), mpLocalMapper(nullptr), mpLoopCloser(nullptr), mpViewer(nullptr),
+    mpFrameDrawer(nullptr), mpMapDrawer(nullptr), mptLocalMapping(nullptr),
+    mptLoopClosing(nullptr), mptViewer(nullptr), mbReset(false), mbResetActiveMap(false),
+    mbActivateLocalizationMode(false), mbDeactivateLocalizationMode(false), mbShutDown(false),
+    mTrackingState(0), settings_(nullptr)
 {
     // Frame keeps camera intrinsics and image bounds in process-wide static
     // fields. A new System may use another sequence's calibration, so force
@@ -244,6 +257,39 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
     // Fix verbosity
     Verbose::SetTh(Verbose::VERBOSITY_QUIET);
 
+}
+
+System::~System()
+{
+    bool shutdown_complete=false;
+    {
+        unique_lock<mutex> lock(mMutexReset);
+        shutdown_complete=mbShutDown;
+    }
+    if(!shutdown_complete) Shutdown();
+
+    if(mpLoopCloser) mpLoopCloser->JoinGBAThread();
+    auto joinAndDelete=[](std::thread*& thread) {
+        if(!thread) return;
+        if(thread->joinable()) thread->join();
+        delete thread;
+        thread=nullptr;
+    };
+    joinAndDelete(mptViewer);
+    joinAndDelete(mptLoopClosing);
+    joinAndDelete(mptLocalMapping);
+
+    // Release users of the map first, then the atlas and its owned maps.
+    delete mpViewer; mpViewer=nullptr;
+    delete mpTracker; mpTracker=nullptr;
+    delete mpLocalMapper; mpLocalMapper=nullptr;
+    delete mpLoopCloser; mpLoopCloser=nullptr;
+    delete mpMapDrawer; mpMapDrawer=nullptr;
+    delete mpFrameDrawer; mpFrameDrawer=nullptr;
+    delete mpKeyFrameDatabase; mpKeyFrameDatabase=nullptr;
+    delete mpAtlas; mpAtlas=nullptr;
+    delete settings_; settings_=nullptr;
+    delete mpVocabulary; mpVocabulary=nullptr;
 }
 
 Sophus::SE3f System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timestamp, const vector<IMU::Point>& vImuMeas, string filename)

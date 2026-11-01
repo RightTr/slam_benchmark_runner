@@ -978,17 +978,8 @@ void LoopClosing::CorrectLoop()
     // If a Global Bundle Adjustment is running, abort it
     if(isRunningGBA())
     {
-        cout << "Stoping Global Bundle Adjustment...";
-        unique_lock<mutex> lock(mMutexGBA);
-        mbStopGBA = true;
-
-        mnFullBAIdx++;
-
-        if(mpThreadGBA)
-        {
-            mpThreadGBA->detach();
-            delete mpThreadGBA;
-        }
+        cout << "Stopping Global Bundle Adjustment...";
+        StopGlobalBundleAdjustment();
         cout << "  Done!!" << endl;
     }
 
@@ -1230,16 +1221,7 @@ void LoopClosing::MergeLocal()
     // If a Global Bundle Adjustment is running, abort it
     if(isRunningGBA())
     {
-        unique_lock<mutex> lock(mMutexGBA);
-        mbStopGBA = true;
-
-        mnFullBAIdx++;
-
-        if(mpThreadGBA)
-        {
-            mpThreadGBA->detach();
-            delete mpThreadGBA;
-        }
+        StopGlobalBundleAdjustment();
         bRelaunchBA = true;
     }
 
@@ -1803,16 +1785,7 @@ void LoopClosing::MergeLocal2()
     // If a Global Bundle Adjustment is running, abort it
     if(isRunningGBA())
     {
-        unique_lock<mutex> lock(mMutexGBA);
-        mbStopGBA = true;
-
-        mnFullBAIdx++;
-
-        if(mpThreadGBA)
-        {
-            mpThreadGBA->detach();
-            delete mpThreadGBA;
-        }
+        StopGlobalBundleAdjustment();
         bRelaunchBA = true;
     }
 
@@ -2515,6 +2488,42 @@ void LoopClosing::RequestFinish()
     unique_lock<mutex> lock(mMutexFinish);
     // cout << "LC: Finish requested" << endl;
     mbFinishRequested = true;
+}
+
+void LoopClosing::StopGlobalBundleAdjustment()
+{
+    std::thread* gba_thread=nullptr;
+    {
+        unique_lock<mutex> lock(mMutexGBA);
+        if(!mbRunningGBA) return;
+        mbStopGBA=true;
+        ++mnFullBAIdx;
+        gba_thread=mpThreadGBA;
+    }
+
+    // Do not detach a worker that still holds map pointers. Joining here keeps
+    // session teardown from racing an abandoned Global BA thread.
+    if(gba_thread && gba_thread->joinable()) gba_thread->join();
+
+    {
+        unique_lock<mutex> lock(mMutexGBA);
+        if(mpThreadGBA==gba_thread)
+        {
+            delete mpThreadGBA;
+            mpThreadGBA=nullptr;
+        }
+        mbRunningGBA=false;
+        mbFinishedGBA=true;
+    }
+}
+
+void LoopClosing::JoinGBAThread()
+{
+    std::thread* gba_thread=mpThreadGBA;
+    if(!gba_thread) return;
+    if(gba_thread->joinable()) gba_thread->join();
+    delete gba_thread;
+    mpThreadGBA=nullptr;
 }
 
 bool LoopClosing::CheckFinish()

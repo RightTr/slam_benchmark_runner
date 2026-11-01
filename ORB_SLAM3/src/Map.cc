@@ -18,6 +18,8 @@
 
 
 #include "Map.h"
+#include "KeyFrame.h"
+#include "MapPoint.h"
 
 #include<mutex>
 
@@ -43,11 +45,18 @@ Map::Map(int initKFid):mnInitKFid(initKFid), mnMaxKFid(initKFid),/*mnLastLoopKFi
 
 Map::~Map()
 {
-    //TODO: erase all points from memory
-    mspMapPoints.clear();
+    std::set<KeyFrame*> keyframes=mspKeyFrames;
+    keyframes.insert(mspRetiredKeyFrames.begin(),mspRetiredKeyFrames.end());
+    for(KeyFrame* keyframe:keyframes) delete keyframe;
 
-    //TODO: erase all keyframes from memory
+    std::set<MapPoint*> points=mspMapPoints;
+    points.insert(mspRetiredMapPoints.begin(),mspRetiredMapPoints.end());
+    for(MapPoint* point:points) delete point;
+
+    mspMapPoints.clear();
     mspKeyFrames.clear();
+    mspRetiredMapPoints.clear();
+    mspRetiredKeyFrames.clear();
 
     if(mThumbnail)
         delete mThumbnail;
@@ -99,9 +108,7 @@ void Map::EraseMapPoint(MapPoint *pMP)
 {
     unique_lock<mutex> lock(mMutexMap);
     mspMapPoints.erase(pMP);
-
-    // TODO: This only erase the pointer.
-    // Delete the MapPoint
+    if(pMP && pMP->isBad()) mspRetiredMapPoints.insert(pMP);
 }
 
 void Map::EraseKeyFrame(KeyFrame *pKF)
@@ -122,8 +129,7 @@ void Map::EraseKeyFrame(KeyFrame *pKF)
         mpKFlowerID = 0;
     }
 
-    // TODO: This only erase the pointer.
-    // Delete the MapPoint
+    if(pKF && pKF->isBad()) mspRetiredKeyFrames.insert(pKF);
 }
 
 void Map::SetReferenceMapPoints(const vector<MapPoint *> &vpMPs)
@@ -220,8 +226,10 @@ void Map::clear()
     {
         KeyFrame* pKF = *sit;
         pKF->UpdateMap(static_cast<Map*>(NULL));
-//        delete *sit;
     }
+
+    mspRetiredMapPoints.insert(mspMapPoints.begin(),mspMapPoints.end());
+    mspRetiredKeyFrames.insert(mspKeyFrames.begin(),mspKeyFrames.end());
 
     mspMapPoints.clear();
     mspKeyFrames.clear();

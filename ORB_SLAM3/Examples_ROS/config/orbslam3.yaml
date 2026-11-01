@@ -3,10 +3,6 @@
     map_frame: map
     camera_frame: camera_link
     use_pangolin: true
-    imu_wait_timeout: 0.5
-    imu_size: 5000
     img_size: 30
     queue_mode: offline
     rgbd_sync_tolerance: 0.02
-    stereo_sync_tolerance: 0.002
-    max_imu_gap: 0.05

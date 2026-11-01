@@ -162,8 +162,8 @@ class Runner final : public rclcpp::Node {
     if (speed!=1.0 && speed!=2.0 && speed!=2.5 && speed!=3.0)
       throw std::runtime_error("playback speed must be 1×, 2×, 2.5× or 3×");
     std::lock_guard<std::mutex> lock(mu_);
-    if (running_ || mode_!=slam_bench::Mode::Test)
-      throw std::runtime_error("speed selection requires idle Test mode");
+    if (running_)
+      throw std::runtime_error("speed selection requires an idle runner");
     rate_scale_=speed;
   }
   void play() {
@@ -476,8 +476,9 @@ class Runner final : public rclcpp::Node {
           expected_final_stamp_=awaiting.last_image_stamp_ns;
           trajectory_received_=false; }
         std::cout << "\n  " << slam_bench::cli::paint(
-          "All images sent. Waiting for ORB-SLAM3 to drain frames, finish mapping/loop closure, and close the viewer. Keep the process running.",
-          "38;5;214") << '\n' << std::flush;
+          "All images sent. ORB-SLAM3 is finishing mapping / loop closure and will close its viewer automatically. Keep the process running.",
+          "38;5;214") << "\n\n  "
+                  << slam_bench::cli::paint("bench> ","1;38;5;45") << std::flush;
         if (!awaitFinal(++command_id_))
           throw std::runtime_error("END ACK and final camera trajectory were not both received within " +
                                    std::to_string(final_trajectory_timeout_ms_) + " ms");
@@ -535,14 +536,28 @@ class Runner final : public rclcpp::Node {
         else
           std::cout << "  ✓ Session"
                     << (progress.state==slam_bench::CompletionState::Complete?" completed":" incomplete");
-        std::cout << '\n';
+        std::cout << "\n  " << slam_bench::cli::paint("bench> ","1;38;5;45") << std::flush;
         if (progress.state!=slam_bench::CompletionState::Complete) break;
         ++completed_sessions;
       }
       if (mode_==slam_bench::Mode::Evaluation && completed_sessions==6 && !stop_) {
         const auto path=evaluation_dir/("submission_"+student_id_+".bin");
-        core_.saveEvaluationBin(path.string(),student_id_);
-        std::cout<<"Evaluation BIN: "<<path<<'\n';
+        const auto temporary=path.string()+".tmp";
+        core_.saveEvaluationBin(temporary,student_id_);
+        bool committed=false;
+        {
+          // Serialize the final commit with cancel(): once cancellation has
+          // been accepted, no complete Evaluation BIN may appear.
+          std::lock_guard<std::mutex> lock(mu_);
+          if (!stop_) {
+            fs::rename(temporary,path);
+            committed=true;
+          }
+        }
+        if (committed)
+          std::cout<<"Evaluation BIN: "<<path<<"\n  "
+                   <<slam_bench::cli::paint("bench> ","1;38;5;45")<<std::flush;
+        else fs::remove(temporary);
       }
     } catch (const std::exception& e) {
       core_.cancelSession();

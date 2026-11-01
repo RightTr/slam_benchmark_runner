@@ -162,6 +162,10 @@ protected:
 
     std::set<MapPoint*> mspMapPoints;
     std::set<KeyFrame*> mspKeyFrames;
+    // Keep removed objects alive while the map may still have frame/keyframe
+    // references to them; release them together when the owning map is freed.
+    std::set<MapPoint*> mspRetiredMapPoints;
+    std::set<KeyFrame*> mspRetiredKeyFrames;
 
     // Save/load, the set structure is broken in libboost 1.58 for ubuntu 16.04, a vector is serializated
     std::vector<MapPoint*> mvpBackupMapPoints;

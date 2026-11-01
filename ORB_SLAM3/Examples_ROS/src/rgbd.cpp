@@ -33,6 +33,8 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <chrono>
+#include <condition_variable>
 
 #include<opencv2/core/core.hpp>
 
@@ -64,7 +66,7 @@ public:
     ImageGrabber(ORB_SLAM3::System* pSLAM, const rclcpp::Node::SharedPtr& nh, const std::string& settings,
                  bool offline, int img_size, std::function<void(uint64_t)> progress):mpSLAM(pSLAM),
                  progress_(std::move(progress)),
-                 sync_queue(new SensorSynchronizer<std::pair<sensor_msgs::msg::Image::ConstSharedPtr,sensor_msgs::msg::Image::ConstSharedPtr>>(offline,img_size,1))
+                 sync_queue(new SensorSynchronizer<std::pair<sensor_msgs::msg::Image::ConstSharedPtr,sensor_msgs::msg::Image::ConstSharedPtr>>(offline,img_size))
     {
         rgbd_sync_tolerance = nh->get_parameter("rgbd_sync_tolerance").as_double();
         cv::FileStorage fs(settings, cv::FileStorage::READ);
@@ -129,8 +131,10 @@ public:
                             system->Shutdown();
                             finalized_ = true;
                         }
+                        grabber_.reset();
+                        slam_.reset();
                         RCLCPP_INFO(rclcpp::get_logger("rgbd"),
-                                    "Cancelled Session cleanup complete; wrapper is ready for RESET");
+                                    "Cancelled Session state released; wrapper is ready for RESET");
                     } catch (const std::exception& e) {
                         RCLCPP_ERROR(rclcpp::get_logger("rgbd"),
                                      "Cancelled Session cleanup failed: %s", e.what());
@@ -156,13 +160,43 @@ public:
                 if (tracker_.joinable()) tracker_.join();
                 RCLCPP_INFO(rclcpp::get_logger("rgbd"),
                             "All input frames tracked; waiting for local mapping and loop closing to finish");
-                system->Shutdown();
+                std::mutex shutdown_mutex;
+                std::condition_variable shutdown_cv;
+                bool shutdown_complete=false;
+                const auto shutdown_started=std::chrono::steady_clock::now();
+                std::thread shutdown_status([&]() {
+                    std::unique_lock<std::mutex> lock(shutdown_mutex);
+                    while (!shutdown_cv.wait_for(lock,std::chrono::seconds(15),
+                                                 [&]() { return shutdown_complete; })) {
+                        const auto elapsed=std::chrono::duration_cast<std::chrono::seconds>(
+                            std::chrono::steady_clock::now()-shutdown_started).count();
+                        lock.unlock();
+                        RCLCPP_INFO(rclcpp::get_logger("rgbd"),
+                            "SLAM backend is still finalizing local mapping / loop closure / global BA (%ld s)",
+                            static_cast<long>(elapsed));
+                        lock.lock();
+                    }
+                });
+                try {
+                    system->Shutdown();
+                } catch (...) {
+                    { std::lock_guard<std::mutex> lock(shutdown_mutex); shutdown_complete=true; }
+                    shutdown_cv.notify_all();
+                    shutdown_status.join();
+                    throw;
+                }
+                { std::lock_guard<std::mutex> lock(shutdown_mutex); shutdown_complete=true; }
+                shutdown_cv.notify_all();
+                shutdown_status.join();
                 finalized_=true;
                 RCLCPP_INFO(rclcpp::get_logger("rgbd"),
                             "SLAM backend stopped; exporting the final camera trajectory");
                 const auto trajectory=(output_dir/(command.session_id+"_trajectory.txt")).string();
                 system->SaveTrajectoryTUM(trajectory);
                 bridge->finishEnd(command,trajectory);
+                finalized_=true;
+                grabber_.reset();
+                slam_.reset();
             } catch(const std::exception& e) {
                 try {
                     grabber->sync_queue->CloseInput();
@@ -170,6 +204,8 @@ public:
                     if (!finalized_) { system->Shutdown(); finalized_=true; }
                 } catch (...) {}
                 bridge->rejectEnd(command,e.what());
+                grabber_.reset();
+                slam_.reset();
             }
         });
     }

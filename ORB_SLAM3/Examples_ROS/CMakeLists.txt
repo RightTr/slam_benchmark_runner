@@ -74,7 +74,7 @@ find_package(ament_cmake REQUIRED)
   find_package(visualization_msgs REQUIRED)
   find_package(slam_bench_msgs REQUIRED)
 
-  foreach(node stereo rgbd stereo_inertial rgbd_inertial)
+  foreach(node rgbd)
     add_executable(ros_${node} "${CMAKE_CURRENT_SOURCE_DIR}/src/${node}.cpp")
     if(node STREQUAL "rgbd")
       target_sources(ros_${node} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/benchmark_bridge.cpp")
