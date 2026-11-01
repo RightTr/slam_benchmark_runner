@@ -49,3 +49,7 @@ CMakeCache.txt
 .vscode/
 .idea/
 .DS_Store
+
+# CLI implementation is distributed only as a compiled library
+/slam_bench_runner/src/cli.cpp
+/slam_bench_runner/src/cli.hpp
