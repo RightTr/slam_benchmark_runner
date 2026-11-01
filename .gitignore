@@ -1,0 +1,51 @@
+# Teacher secrets: never commit encryption/signing keys
+/key/
+**/key/
+*.key
+*.pem
+*.priv
+
+# Raw datasets and plaintext ground truth
+/data/rgbd_dataset_*/
+/data/raw/
+/data/groundtruth/
+/data/**/groundtruth.txt
+/data/**/gt.txt
+/groundtruth/
+**/groundtruth/
+**/groundtruth.txt
+**/gt.txt
+
+# Teacher-only source and tools
+/slam_bench_runner/teacher/
+/slam_bench_runner/src/generated_groundtruth.cpp
+/slam_bench_runner/src/embedded_groundtruth.hpp
+/slam_bench_runner/src/benchmark_core.cpp
+/slam_bench_runner/src/benchmark_input.cpp
+/slam_bench_runner/src/benchmark_output.cpp
+
+# Local run output, plots, logs, temporary calibration files
+/slam_bench_runs/
+/benchmark_trajectories/
+/results/
+*.png
+*.csv
+settings_session_*.yaml
+
+# ROS 2 / CMake build products
+/build/
+/install/
+/log/
+**/build/
+**/install/
+**/log/
+CMakeFiles/
+CMakeCache.txt
+*.o
+*.a
+*.so*
+
+# Editors and OS files
+.vscode/
+.idea/
+.DS_Store

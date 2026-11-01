@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>slam_bench_runner</name>
+  <version>0.1.0</version>
+  <description>SLAM-Bench ROS 2 runner prototype.</description>
+  <maintainer email="maintainer@example.com">SLAM-Bench</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>slam_bench_msgs</depend>
+  <depend>opencv</depend>
+  <depend>openssl</depend>
+  <depend>eigen</depend>
+  <exec_depend>ros2run</exec_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>
