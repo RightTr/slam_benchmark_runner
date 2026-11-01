@@ -11,6 +11,7 @@ struct Actions {
   std::function<void()> test;
   std::function<void(const std::string&)> evaluation;
   std::function<void(int)> select;
+  std::function<void(double)> set_speed;
   std::function<void()> play;
   std::function<void()> pause;
   std::function<void()> resume;

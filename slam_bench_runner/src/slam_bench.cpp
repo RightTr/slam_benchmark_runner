@@ -14,8 +14,10 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <ctime>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <mutex>
@@ -27,6 +29,21 @@ namespace fs = std::filesystem;
 static int64_t steadyNs() {
   return std::chrono::duration_cast<std::chrono::nanoseconds>(
     std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+static fs::path runDirectory(const fs::path& root, bool evaluation, int sequence,
+                             const std::string& unique_id) {
+  const auto now=std::chrono::system_clock::now();
+  const std::time_t seconds=std::chrono::system_clock::to_time_t(now);
+  std::tm local{};
+  localtime_r(&seconds,&local);
+  const auto milliseconds=std::chrono::duration_cast<std::chrono::milliseconds>(
+    now.time_since_epoch()).count()%1000;
+  std::ostringstream name;
+  if (evaluation) name << "evaluation";
+  else name << "sequence_" << std::setw(2) << std::setfill('0') << sequence;
+  name << '_' << std::put_time(&local,"%Y-%m-%d_%H-%M-%S")
+       << '_' << std::setw(3) << milliseconds << '_' << unique_id.substr(0,8);
+  return fs::absolute(root/(evaluation?"eval":"test")/name.str());
 }
 
 class Runner final : public rclcpp::Node {
@@ -119,13 +136,22 @@ class Runner final : public rclcpp::Node {
       if (!valid_student_id) throw std::runtime_error("student ID must contain exactly 13 digits");
       student_id_=student_id;
     }
-    mode_ = mode; core_.initialize(mode_,dataset_dir_,dataset_key_file_); phase_=Phase::Idle;
+    mode_ = mode; if (mode_==slam_bench::Mode::Evaluation) rate_scale_=1.0;
+    core_.initialize(mode_,dataset_dir_,dataset_key_file_); phase_=Phase::Idle;
     core_.setTeacherPublicKey(teacher_public_key_);
   }
   void select(int id) {
     std::lock_guard<std::mutex> lock(mu_);
     if (running_ || mode_ != slam_bench::Mode::Test) throw std::runtime_error("selection requires idle Test mode");
     core_.selectSequence(id); selected_=id;
+  }
+  void setSpeed(double speed) {
+    if (speed!=1.0 && speed!=2.0 && speed!=2.5 && speed!=3.0)
+      throw std::runtime_error("playback speed must be 1×, 2×, 2.5× or 3×");
+    std::lock_guard<std::mutex> lock(mu_);
+    if (running_ || mode_!=slam_bench::Mode::Test)
+      throw std::runtime_error("speed selection requires idle Test mode");
+    rate_scale_=speed;
   }
   void play() {
     if (mode_==slam_bench::Mode::Evaluation) {
@@ -197,6 +223,10 @@ class Runner final : public rclcpp::Node {
     };
     row("Mode",mode_==slam_bench::Mode::Test?"Test":"Evaluation");
     row("Sequence",mode_==slam_bench::Mode::Test?std::to_string(selected_):"Randomized (six sessions)");
+    if (mode_==slam_bench::Mode::Test) {
+      std::ostringstream speed; speed << rate_scale_ << "×";
+      row("Speed",speed.str());
+    }
     row("Phase",running_&&stop_.load()?"CANCELLING":phaseName(phase_));
     row("SLAM link",connected?"● connected":"○ waiting",connected?"38;5;82":"38;5;214");
     row("Progress",bar,"38;5;45");
@@ -322,6 +352,9 @@ class Runner final : public rclcpp::Node {
     try {
       auto order=core_.sequenceOrder();
       size_t completed_sessions=0;
+      const fs::path evaluation_dir=mode_==slam_bench::Mode::Evaluation
+        ? runDirectory(output_dir_,true,0,run_uuid_) : fs::path{};
+      if (mode_==slam_bench::Mode::Evaluation) fs::create_directories(evaluation_dir);
       for (int seq: order) {
         if (stop_) {
           std::lock_guard<std::mutex> lock(mu_);
@@ -332,6 +365,12 @@ class Runner final : public rclcpp::Node {
         { std::lock_guard<std::mutex> lock(mu_); selected_=seq; session_id_=slam_bench::BenchmarkCore::generateRunUuid();
           if (completed_sessions>0) { paused_=false;playback_started_=false;paused_total_ns_=0; }
           phase_=paused_?Phase::Paused:Phase::Preparing; }
+        std::ostringstream session_name;
+        session_name << "session_" << std::setw(2) << std::setfill('0') << completed_sessions+1;
+        const fs::path session_output_dir = mode_==slam_bench::Mode::Test
+          ? runDirectory(output_dir_,false,seq,session_id_)
+          : evaluation_dir/session_name.str();
+        fs::create_directories(session_output_dir);
         core_.beginSession(run_uuid_,session_id_);
         if (camera_info_pub_) camera_info_pub_->publish(loadCameraInfo(seq));
         if (!awaitImageSubscribers()) {
@@ -435,14 +474,24 @@ class Runner final : public rclcpp::Node {
             row("Rotation RPE",score.rpe_rot,6,"deg");
             row("Tracking",score.tracking_ratio*100.0,2,"%");
             std::cout << slam_bench::cli::paint(table_bottom,"38;5;45") << '\n';
-            std::ostringstream sequence_label;
-            sequence_label << "sequence_" << std::setw(2) << std::setfill('0') << seq;
-            const std::string plot_prefix = mode_==slam_bench::Mode::Test
-                ? sequence_label.str()+"_" : std::string{};
-            const auto plot2d=fs::path(output_dir_)/(plot_prefix+session_id_+"_2d.png");
-            const auto plot3d=fs::path(output_dir_)/(plot_prefix+session_id_+"_3d.png");
+            const auto plot2d=session_output_dir/"trajectory_2d.png";
+            const auto plot3d=session_output_dir/"trajectory_3d.png";
             output_.saveTrajectory2D(plot2d.string());
             output_.saveTrajectory3D(plot3d.string());
+            {
+              std::ofstream metrics(session_output_dir/"metrics.txt",std::ios::trunc);
+              if (!metrics) throw std::runtime_error("cannot create metrics.txt");
+              if (mode_==slam_bench::Mode::Test) metrics << "sequence=" << seq << '\n';
+              else metrics << "session=" << completed_sessions+1 << '\n';
+              metrics << "ate_rmse_m=" << metric(score.ate_rmse,8) << '\n'
+                      << "rte_rmse_m=" << metric(score.rpe_trans,8) << '\n'
+                      << "rotation_rpe_rmse_deg=" << metric(score.rpe_rot,6) << '\n'
+                      << "tracking_ratio=" << metric(score.tracking_ratio,8) << '\n'
+                      << "frames_received=" << progress.received_frames << '\n'
+                      << "frames_expected=" << progress.expected_frames << '\n';
+              metrics.close();
+              if (!metrics) throw std::runtime_error("cannot save metrics.txt");
+            }
             std::cout << std::flush;
           } catch(const std::exception& e) { throw std::runtime_error(std::string("Scoring or plot failed: ")+e.what()); }
         }
@@ -458,7 +507,7 @@ class Runner final : public rclcpp::Node {
         ++completed_sessions;
       }
       if (mode_==slam_bench::Mode::Evaluation && completed_sessions==6 && !stop_) {
-        const auto path=fs::path(output_dir_)/("submission_"+student_id_+".bin");
+        const auto path=evaluation_dir/("submission_"+student_id_+".bin");
         core_.saveEvaluationBin(path.string(),student_id_);
         std::cout<<"Evaluation BIN: "<<path<<'\n';
       }
@@ -505,6 +554,7 @@ int main(int argc,char** argv) {
   actions.test=[runner]{runner->setMode(slam_bench::Mode::Test);};
   actions.evaluation=[runner](const std::string& student_id){runner->setMode(slam_bench::Mode::Evaluation,student_id);};
   actions.select=[runner](int id){runner->select(id);};
+  actions.set_speed=[runner](double speed){runner->setSpeed(speed);};
   actions.play=[runner]{runner->play();};
   actions.pause=[runner]{runner->pause();};
   actions.resume=[runner]{runner->resume();};

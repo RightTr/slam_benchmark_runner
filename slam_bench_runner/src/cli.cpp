@@ -254,6 +254,47 @@ MenuResult chooseTestSequence(int& selected) {
   }
 }
 
+MenuResult choosePlaybackSpeed(double& speed) {
+  constexpr std::array<double,4> speeds{1.0,2.0,2.5,3.0};
+  constexpr std::array<const char*,4> labels{"1×  Original", "2×  Fast", "2.5×  Faster", "3×  Fastest"};
+  RawTerminal raw;
+  if (!raw.active()) {
+    std::cout << "\n  Playback speed: [1] 1×  [2] 2×  [3] 2.5×  [4] 3×\n";
+    prompt("speed (1-4, blank cancels) › ");
+    std::string answer;
+    const auto result=readLine(answer,"speed (1-4, blank cancels) › ",false);
+    if (result==InputResult::Interrupt) return MenuResult::Interrupt;
+    if (result!=InputResult::Line || answer.empty()) return MenuResult::Cancelled;
+    int selected=0;
+    try { selected=std::stoi(answer); } catch (...) { return MenuResult::Cancelled; }
+    if (selected<1 || selected>4) return MenuResult::Cancelled;
+    speed=speeds[static_cast<size_t>(selected-1)];
+    return MenuResult::Confirmed;
+  }
+  size_t choice=0;
+  bool redraw=true;
+  while (true) {
+    if (redraw) {
+      if (::isatty(STDOUT_FILENO)) std::cout << "\033[2J\033[H";
+      std::cout << paint("  ╭─ Playback speed ─────────────────────────────────────╮", "38;5;45") << '\n';
+      for (size_t i=0;i<speeds.size();++i) {
+        const std::string item=std::string(i==choice?"  › ":"    ")+labels[i];
+        std::cout << "  │" << (i==choice?paint(item,"1;38;5;45"):item)
+                  << std::string(54-item.size(),' ') << "│\n";
+      }
+      std::cout << paint("  ╰──────────────────────────────────────────────────────╯", "38;5;45") << '\n'
+                << "  Use ↑ / ↓ to move, Enter to start, Esc to return.\n" << std::flush;
+      redraw=false;
+    }
+    const Key key=readKey();
+    if (key==Key::Interrupt) { raw.restore(); return MenuResult::Interrupt; }
+    if (key==Key::Back) { raw.restore(); return MenuResult::Cancelled; }
+    if (key==Key::Up) { choice=(choice+speeds.size()-1)%speeds.size(); redraw=true; }
+    if (key==Key::Down) { choice=(choice+1)%speeds.size(); redraw=true; }
+    if (key==Key::Enter) { speed=speeds[choice]; raw.restore(); return MenuResult::Confirmed; }
+  }
+}
+
 MenuResult confirmEvaluationStart() {
   std::cout << '\n' << paint("  ╭─ Evaluation run ────────────────────────────────────╮", "38;5;45") << '\n'
             << "  │ Six sequences will run in a randomized order.        │\n"
@@ -489,11 +530,22 @@ int Console::run() {
           if (confirmExit(actions_.is_running())) return 0;
           home();
         } else if (choice == MenuResult::Confirmed) {
-          home();
-          actions_.select(selected);
-          actions_.play();
-          saw_active_run = true;
-          std::cout << paint(std::string("  ▶  Test queued · Sequence ") + (selected < 10 ? "0" : "") + std::to_string(selected) + " · waiting for SLAM", "1;38;5;82") << "\n\n";
+          double speed=1.0;
+          const auto speed_choice=choosePlaybackSpeed(speed);
+          if (speed_choice==MenuResult::Interrupt) {
+            if (confirmExit(actions_.is_running())) return 0;
+            home();
+          } else if (speed_choice==MenuResult::Confirmed) {
+            home();
+            actions_.select(selected);
+            actions_.set_speed(speed);
+            actions_.play();
+            saw_active_run = true;
+            std::ostringstream queued;
+            queued << "  ▶  Test queued · Sequence " << (selected<10?"0":"") << selected
+                   << " · " << speed << "× · waiting for SLAM";
+            std::cout << paint(queued.str(),"1;38;5;82") << "\n\n";
+          } else home();
         } else {
           home();
         }
