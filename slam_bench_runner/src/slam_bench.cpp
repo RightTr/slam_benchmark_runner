@@ -75,9 +75,7 @@ class Runner final : public rclcpp::Node {
       "/benchmark/control_ack", 10,
       [this](slam_bench_msgs::msg::BenchmarkControlAck::ConstSharedPtr msg) { onAck(*msg); });
     trajectory_sub_ = create_subscription<nav_msgs::msg::Path>("/benchmark/trajectory_final", 1,
-      [this](nav_msgs::msg::Path::ConstSharedPtr msg) { onFinalPath(*msg,false); });
-    keyframes_sub_ = create_subscription<nav_msgs::msg::Path>("/benchmark/keyframes_final", 1,
-      [this](nav_msgs::msg::Path::ConstSharedPtr msg) { onFinalPath(*msg,true); });
+      [this](nav_msgs::msg::Path::ConstSharedPtr msg) { onFinalPath(*msg); });
   }
   ~Runner() override { stop(); wait(); }
   void wait() { if (worker_.joinable()) worker_.join(); }
@@ -210,6 +208,7 @@ class Runner final : public rclcpp::Node {
   void send(uint8_t command, uint64_t id) {
     slam_bench_msgs::msg::BenchmarkControl m;
     m.command=command; m.command_id=id; m.run_uuid=run_uuid_; m.session_id=session_id_;
+    m.evaluation_mode=(mode_==slam_bench::Mode::Evaluation);
     if (command==slam_bench_msgs::msg::BenchmarkControl::END)
       m.final_image_stamp_ns=expected_final_stamp_;
     control_pub_->publish(m);
@@ -219,14 +218,9 @@ class Runner final : public rclcpp::Node {
     std::unique_lock<std::mutex> lock(mu_);
     ack_command_=command; ack_id_=id; acked_=false; ack_accepted_=false; ack_detail_.clear();
     while (!stop_ && !acked_ && std::chrono::steady_clock::now()<deadline) {
-      if (command == slam_bench_msgs::msg::BenchmarkControl::RESET && id != 0 && !reset_wait_logged_) {
-        RCLCPP_INFO(get_logger(), "Waiting for ORB-SLAM3 RESET ACK; System construction loads the vocabulary");
-        reset_wait_logged_ = true;
-      }
       lock.unlock(); send(command,id); lock.lock();
       cv_.wait_for(lock,500ms,[this] { return stop_.load() || acked_; });
     }
-    if (command == slam_bench_msgs::msg::BenchmarkControl::RESET) reset_wait_logged_ = false;
     if (stop_) return false;
     if (!acked_) return false;
     if (!ack_accepted_)
@@ -249,12 +243,11 @@ class Runner final : public rclcpp::Node {
       acked_=true; ack_accepted_=m.accepted; ack_detail_=m.detail; cv_.notify_all();
     }
   }
-  void onFinalPath(const nav_msgs::msg::Path& m,bool keyframes) {
+  void onFinalPath(const nav_msgs::msg::Path& m) {
     const int64_t stamp=int64_t(m.header.stamp.sec)*1000000000LL+m.header.stamp.nanosec;
     std::lock_guard<std::mutex> lock(mu_);
     if (stamp!=expected_final_stamp_ || m.poses.empty()) return;
-    if (keyframes) { keyframes_path_=m; keyframes_received_=true; }
-    else { trajectory_path_=m; trajectory_received_=true; }
+    trajectory_path_=m; trajectory_received_=true;
     cv_.notify_all();
   }
   bool awaitFinal(uint64_t id) {
@@ -264,8 +257,8 @@ class Runner final : public rclcpp::Node {
     lock.unlock();send(slam_bench_msgs::msg::BenchmarkControl::END,id);lock.lock();
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(final_trajectory_timeout_ms_);
     cv_.wait_until(lock,deadline,[this]{return stop_.load() || (acked_ && !ack_accepted_) ||
-      (acked_ && trajectory_received_ && keyframes_received_);});
-    return !stop_ && acked_ && ack_accepted_ && trajectory_received_ && keyframes_received_;
+      (acked_ && trajectory_received_);});
+    return !stop_ && acked_ && ack_accepted_ && trajectory_received_;
   }
   sensor_msgs::msg::CameraInfo loadCameraInfo(int sequence_id) const {
     const fs::path file=camera_info_file_.empty()
@@ -394,11 +387,11 @@ class Runner final : public rclcpp::Node {
         { std::lock_guard<std::mutex> lock(mu_);
           phase_=Phase::WaitingFinalTrajectory;
           expected_final_stamp_=awaiting.last_image_stamp_ns;
-          trajectory_received_=keyframes_received_=false; }
+          trajectory_received_=false; }
         if (!awaitFinal(++command_id_))
           throw std::runtime_error("END export or final trajectories timeout");
-        nav_msgs::msg::Path final_path,keyframe_path;
-        { std::lock_guard<std::mutex> lock(mu_); final_path=trajectory_path_; keyframe_path=keyframes_path_; }
+        nav_msgs::msg::Path final_path;
+        { std::lock_guard<std::mutex> lock(mu_); final_path=trajectory_path_; }
         std::vector<slam_bench::FinalPose> final_poses;
         for (const auto& item:final_path.poses) {
           slam_bench::PoseData p;
@@ -408,15 +401,6 @@ class Runner final : public rclcpp::Node {
           final_poses.push_back({int64_t(item.header.stamp.sec)*1000000000LL+item.header.stamp.nanosec,p});
         }
         output_.recordFinalTrajectory(final_poses);
-        std::vector<slam_bench::FinalPose> keyframe_poses;
-        for (const auto& item:keyframe_path.poses) {
-          slam_bench::PoseData p;
-          p.px=item.pose.position.x;p.py=item.pose.position.y;p.pz=item.pose.position.z;
-          p.qx=item.pose.orientation.x;p.qy=item.pose.orientation.y;
-          p.qz=item.pose.orientation.z;p.qw=item.pose.orientation.w;p.valid=true;
-          keyframe_poses.push_back({int64_t(item.header.stamp.sec)*1000000000LL+item.header.stamp.nanosec,p});
-        }
-        output_.recordKeyframeTrajectory(keyframe_poses);
         output_.finishSession(steadyNs());
         auto progress=output_.completionStatus(steadyNs());
         { std::lock_guard<std::mutex> lock(mu_);
@@ -427,24 +411,30 @@ class Runner final : public rclcpp::Node {
         if (!stop_) {
           try {
             auto score=output_.evaluate();
-            std::cout << slam_bench::cli::paint("  ╭─ Evaluation metrics ────────────────────────────────╮", "38;5;45") << '\n'
-                      << "  │ ATE RMSE       " << std::fixed << std::setprecision(8)
-                      << std::setw(22) << score.ate_rmse << " m             │\n"
-                      << "  │ RTE RMSE       " << std::setprecision(8)
-                      << std::setw(22) << score.rpe_trans << " m             │\n"
-                      << "  │ Rotation RPE   " << std::setprecision(6)
-                      << std::setw(22) << score.rpe_rot << " deg           │\n"
-                      << std::setprecision(2)
-                      << "  │ Tracking       " << std::setw(22) << score.tracking_ratio*100.0 << " %             │\n"
-                      << slam_bench::cli::paint("  ╰──────────────────────────────────────────────────────╯", "38;5;45") << '\n';
-            try {
-              const auto keyframe_score=core_.getKeyframeScore();
-              std::cout << std::fixed << std::setprecision(8)
-                        << "Keyframe diagnostic ATE/RTE=" << keyframe_score.ate_rmse << "/"
-                        << keyframe_score.rpe_trans << " m\n";
-            } catch(const std::exception& e) {
-              std::cout << "Keyframe diagnostic unavailable: " << e.what() << '\n';
-            }
+            auto metric = [](double value, int precision) {
+              if (!std::isfinite(value)) return std::string("N/A");
+              std::ostringstream out; out << std::fixed << std::setprecision(precision) << value;
+              return out.str();
+            };
+            auto row = [&](const std::string& name, double value, int precision, const char* unit) {
+              std::cout << "  │ " << std::left << std::setw(23) << name << "│ "
+                        << std::right << std::setw(13) << metric(value,precision) << " │ "
+                        << std::left << std::setw(6) << unit << " │\n";
+            };
+            const std::string table_top="  ╭────────────────────────┬───────────────┬────────╮";
+            const std::string table_mid="  ├────────────────────────┼───────────────┼────────┤";
+            const std::string table_bottom="  ╰────────────────────────┴───────────────┴────────╯";
+            std::cout << "\n  Loop-closed camera trajectory results\n"
+                      << slam_bench::cli::paint(table_top,"38;5;45") << '\n'
+                      << "  │ " << std::left << std::setw(23) << "Metric" << "│ "
+                      << std::right << std::setw(13) << "Value" << " │ "
+                      << std::left << std::setw(6) << "Unit" << " │\n"
+                      << slam_bench::cli::paint(table_mid,"38;5;45") << '\n';
+            row("ATE RMSE",score.ate_rmse,8,"m");
+            row("RTE RMSE",score.rpe_trans,8,"m");
+            row("Rotation RPE",score.rpe_rot,6,"deg");
+            row("Tracking",score.tracking_ratio*100.0,2,"%");
+            std::cout << slam_bench::cli::paint(table_bottom,"38;5;45") << '\n';
             std::ostringstream sequence_label;
             sequence_label << "sequence_" << std::setw(2) << std::setfill('0') << seq;
             const std::string plot_prefix = mode_==slam_bench::Mode::Test
@@ -453,17 +443,17 @@ class Runner final : public rclcpp::Node {
             const auto plot3d=fs::path(output_dir_)/(plot_prefix+session_id_+"_3d.png");
             output_.saveTrajectory2D(plot2d.string());
             output_.saveTrajectory3D(plot3d.string());
-            std::cout << "Trajectory visualization saved:\n"
-                      << "  2D: " << plot2d << '\n'
-                      << "  3D: " << plot3d << '\n';
+            std::cout << std::flush;
           } catch(const std::exception& e) { throw std::runtime_error(std::string("Scoring or plot failed: ")+e.what()); }
         }
         if (mode_==slam_bench::Mode::Test)
-          std::cout << "Sequence " << std::setw(2) << std::setfill('0') << seq;
+          std::cout << "  ✓ Sequence " << (seq<10?"0":"") << seq
+                    << (progress.state==slam_bench::CompletionState::Complete
+                        ? " completed · Returning to main menu" : " incomplete");
         else
-          std::cout << "Session";
-        std::cout << (progress.state==slam_bench::CompletionState::Complete?" completed":" incomplete")
-                  << std::setfill(' ') << '\n';
+          std::cout << "  ✓ Session"
+                    << (progress.state==slam_bench::CompletionState::Complete?" completed":" incomplete");
+        std::cout << '\n';
         if (progress.state!=slam_bench::CompletionState::Complete) break;
         ++completed_sessions;
       }
@@ -493,9 +483,8 @@ class Runner final : public rclcpp::Node {
   double rate_scale_{1};int final_trajectory_timeout_ms_{60000},ack_timeout_ms_{5000},reset_timeout_ms_{60000},selected_{1};
   uint64_t command_id_{0},ack_id_{0}; uint8_t ack_command_{0};bool acked_{false},ack_accepted_{false},running_{false};
   std::string ack_detail_;
-  bool reset_wait_logged_{false};
-  int64_t expected_final_stamp_{0}; bool trajectory_received_{false},keyframes_received_{false};
-  nav_msgs::msg::Path trajectory_path_,keyframes_path_;
+  int64_t expected_final_stamp_{0}; bool trajectory_received_{false};
+  nav_msgs::msg::Path trajectory_path_;
   Phase phase_{Phase::Idle}; bool paused_{false},playback_started_{false}; int64_t pause_started_ns_{0},paused_total_ns_{0};
   std::atomic<bool> stop_{false};mutable std::mutex mu_;std::condition_variable cv_;std::thread worker_;
   std::string pending_error_;
@@ -503,7 +492,7 @@ class Runner final : public rclcpp::Node {
   rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_pub_;
   rclcpp::Publisher<slam_bench_msgs::msg::BenchmarkControl>::SharedPtr control_pub_;
   rclcpp::Subscription<slam_bench_msgs::msg::BenchmarkControlAck>::SharedPtr ack_sub_;
-  rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr trajectory_sub_,keyframes_sub_;
+  rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr trajectory_sub_;
 };
 int main(int argc,char** argv) {
   rclcpp::init(argc,argv);std::shared_ptr<Runner> runner;

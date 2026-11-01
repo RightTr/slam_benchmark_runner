@@ -7,3 +7,4 @@ uint64 command_id
 string run_uuid
 string session_id
 int64 final_image_stamp_ns
+bool evaluation_mode

@@ -424,8 +424,9 @@ void help() {
             << paint("quit", "1;38;5;203") << "\n\n";
 }
 
-void home() {
-  banner();
+void home(bool show_banner = false) {
+  if (show_banner) banner();
+  else std::cout << "\n" << paint("  SLAM BENCH  /  RUNNER  ·  v1.0", "1;38;5;214") << "\n";
   help();
 }
 }  // namespace
@@ -443,7 +444,7 @@ int Console::run() {
   action.sa_flags = 0;  // Let poll() return so Ctrl-C can be handled by this console.
   sigaction(SIGINT, &action, nullptr);
 
-  home();
+  home(true);
   std::string line;
   bool saw_active_run = false;
   while (true) {
@@ -464,11 +465,12 @@ int Console::run() {
     if (result == InputResult::RunError) {
       if (async_error.empty()) {
         saw_active_run = false;
-        std::cout << "\r\033[2K\n  Run finished. Returning to main menu.\n\n";
+        std::cout << "\r\033[2K";
         home();
         continue;
       }
       std::cout << "\r\033[2K\n" << paint(std::string("  Error: ")+async_error, "1;38;5;203") << "\n\n";
+      saw_active_run = false;
       home();
       continue;
     }
