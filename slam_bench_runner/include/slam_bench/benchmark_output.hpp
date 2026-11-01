@@ -10,7 +10,6 @@ class SLAM_BENCH_API BenchmarkOutput {
   void recordDepthPublishBegin(uint64_t frame_id,int64_t time_ns);
   void recordDepthPublishEnd(uint64_t frame_id,int64_t time_ns);
   void recordFinalTrajectory(const std::vector<FinalPose>& trajectory);
-  void recordKeyframeTrajectory(const std::vector<FinalPose>& trajectory);
   void markAllImagesPublished(int64_t final_depth_end_ns);
   SessionProgress completionStatus(int64_t now_steady_ns) const;
   void finishSession(int64_t now_steady_ns);

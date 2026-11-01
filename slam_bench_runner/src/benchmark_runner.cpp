@@ -428,7 +428,6 @@ class Runner final : public rclcpp::Node {
               metrics.close();
               if (!metrics) throw std::runtime_error("cannot save metrics.txt");
             }
-            std::cout << std::flush;
           } catch(const std::exception& e) { throw std::runtime_error(std::string("Scoring or plot failed: ")+e.what()); }
         }
   }

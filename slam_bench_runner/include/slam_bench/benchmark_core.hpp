@@ -22,7 +22,6 @@ struct Score { double ate_rmse{}, rpe_trans{}, rpe_rot{}, tracking_ratio{}; };
 struct ImageFrame { uint64_t frame_id{}; int64_t stamp_ns{}, relative_ns{}; cv::Mat rgb, depth; };
 struct PoseData { double px{},py{},pz{},qx{},qy{},qz{},qw{1.0}; bool valid{}; };
 struct FinalPose { int64_t stamp_ns{}; PoseData pose; };
-struct Timing { int64_t rgb_begin{}, rgb_end{}, depth_begin{}, depth_end{}; };
 enum class CompletionState { WaitingForImages, WaitingForFinalTrajectory, Complete, Incomplete, Cancelled };
 struct SessionProgress {
   CompletionState state{CompletionState::WaitingForImages};
@@ -34,7 +33,6 @@ struct SessionProgress {
 class SLAM_BENCH_API BenchmarkCore {
  public:
   static std::string generateRunUuid();
-  static int64_t generateTimestampBaseNs();
   BenchmarkCore();
   ~BenchmarkCore();
   BenchmarkCore(BenchmarkCore&&) noexcept;
@@ -52,9 +50,7 @@ class SLAM_BENCH_API BenchmarkCore {
   void recordRgbPublishEnd(uint64_t frame_id, int64_t time_ns);
   void recordDepthPublishBegin(uint64_t frame_id, int64_t time_ns);
   void recordDepthPublishEnd(uint64_t frame_id, int64_t time_ns);
-  void recordImagePublish(uint64_t frame_id, const Timing& timing);
   void recordFinalTrajectory(const std::vector<FinalPose>& trajectory);
-  void recordKeyframeTrajectory(const std::vector<FinalPose>& trajectory);
   void markAllImagesPublished(int64_t final_depth_end_ns);
   SessionProgress completionStatus(int64_t now_steady_ns) const;
   void finishSession(int64_t now_steady_ns);
@@ -62,7 +58,6 @@ class SLAM_BENCH_API BenchmarkCore {
   void setFinalTrajectoryTimeoutMs(int64_t timeout_ms);
   void setTeacherPublicKey(const std::string& path);
   Score getScore() const;
-  Score getKeyframeScore() const;
   void savePlot(const std::string& path) const;
   void saveTrajectory3D(const std::string& path) const;
   void saveEvaluationBin(const std::string& path, const std::string& student_id) const;

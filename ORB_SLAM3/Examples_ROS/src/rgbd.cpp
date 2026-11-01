@@ -108,8 +108,6 @@ public:
         // map; do not overlap Pangolin or backend state across Sessions.
         slam_.reset();
         finalized_=true;
-        RCLCPP_INFO(rclcpp::get_logger("rgbd"),
-                    "Previous ORB-SLAM3 System, viewer, and RGB-D queue cleared");
         slam_=std::make_unique<ORB_SLAM3::System>(vocabulary,settings,ORB_SLAM3::System::RGBD,
             node->get_parameter("use_pangolin").as_bool());
         grabber_=std::make_shared<ImageGrabber>(slam_.get(),node,settings,true,
@@ -251,13 +249,10 @@ static int runBenchmark(const rclcpp::Node::SharedPtr& nh,
     BenchmarkSession session;
     BenchmarkBridge* bridge_ptr=nullptr;
     auto reset=[&]() {
-        RCLCPP_INFO(nh->get_logger(), "RESET: loading CameraInfo and preparing session settings");
         std::string session_settings=settings;
             sensor_msgs::msg::CameraInfo::ConstSharedPtr info;
             { std::lock_guard<std::mutex> lock(camera_info_mutex); info=camera_info; }
             if (!info) throw std::runtime_error("valid CameraInfo required on camera_info_topic before RESET");
-            RCLCPP_INFO(nh->get_logger(), "RESET: CameraInfo received (%ux%u), writing session calibration",
-                        info->width, info->height);
             std::ifstream source(settings);
             if (!source) throw std::runtime_error("cannot read ORB-SLAM3 settings: "+settings);
             std::string content((std::istreambuf_iterator<char>(source)), {});
