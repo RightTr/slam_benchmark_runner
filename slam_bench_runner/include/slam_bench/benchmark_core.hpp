@@ -42,6 +42,7 @@ class SLAM_BENCH_API BenchmarkCore {
   BenchmarkCore(const BenchmarkCore&) = delete;
   BenchmarkCore& operator=(const BenchmarkCore&) = delete;
   void initialize(Mode mode, const std::string& dataset_dir);
+  void setSequenceArchivePaths(const std::vector<std::string>& paths);
   void selectSequence(int sequence_id);
   std::vector<int> sequenceOrder() const;
   void beginSession(const std::string& run_uuid, const std::string& session_id);

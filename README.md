@@ -9,6 +9,10 @@ SLAM-Bench Runner is the offline RGB-D benchmark for the **Robot Vision and Navi
 - 🧪 Test mode: choose a sequence and playback speed, then view ATE, RTE, and 2D/3D trajectory plots.
 - 📊 Evaluation mode: run all six sequences and create one encrypted submission BIN, in addition to the metrics and plots.
 
+## 🧠 Algorithm changes
+
+You may modify the ORB-SLAM3 core algorithms, including Tracking, Local Mapping, Loop Closing, and Bundle Adjustment. Keep `ORB_SLAM3/Examples_ROS` and the benchmark ROS 2 message protocol unchanged; the wrapper handles benchmark control and final trajectory export.
+
 ## ▶️ Run
 
 ### Build ORB-SLAM3
@@ -24,25 +28,17 @@ cd ORB_SLAM3
 
 ### Start a run
 
-1. Start the student ORB-SLAM3 node in one terminal:
+Before running, set the six archive and calibration file paths in `slam_bench_runner/config/datasets.json` for your local dataset folder.
 
-   ```bash
-   cd /home/right/slambr_ws
-   source /opt/ros/humble/setup.bash
-   source /home/right/slambr_ws/install/setup.bash
-   ros2 launch orb_slam3 rgbd.launch.py \
-     vocabulary:=src/slam_benchmark_runner/ORB_SLAM3/Vocabulary/ORBvoc.txt
-   ```
-
-   The wrapper subscribes to `/benchmark/rgb`, `/benchmark/depth`, and `/benchmark/camera_info`; it handles `/benchmark/control` and publishes the final camera trajectory on `/benchmark/trajectory_final`.
-
-2. Start the benchmark in another terminal:
+1. Start both ORB-SLAM3 RGB-D and the benchmark console:
 
    ```bash
    ./run_slam_bench.sh
    ```
 
-3. Choose `test` or `eval` in the console. Test lets you pick a sequence and speed; Evaluation asks for your 13-digit student ID. Use `status`, `pause`, `resume`, or `cancel` during a run.
+   The script opens the Pangolin viewer, then starts the console. ORB-SLAM3 subscribes to `/benchmark/rgb`, `/benchmark/depth`, and `/benchmark/camera_info`; it handles `/benchmark/control`, reports processed-frame progress on `/benchmark/progress`, and publishes the final camera trajectory on `/benchmark/trajectory_final`. Its launch log is saved in the results folder.
+
+2. Choose `test` or `eval` in the console. Test lets you pick a sequence and speed; Evaluation asks for your 13-digit student ID. Use `status`, `pause`, `resume`, or `cancel` during a run.
 
 The SLAM node sends its final camera trajectory on `/benchmark/trajectory_final` and acknowledges control commands on `/benchmark/control_ack`. Image and trajectory timestamps must match exactly. The full six-sequence dataset package is required for Evaluation.
 

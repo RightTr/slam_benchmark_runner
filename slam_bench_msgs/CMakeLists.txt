@@ -5,6 +5,7 @@ find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/BenchmarkControl.msg"
   "msg/BenchmarkControlAck.msg"
+  "msg/BenchmarkProgress.msg"
   )
 ament_export_dependencies(rosidl_default_runtime)
 ament_package()

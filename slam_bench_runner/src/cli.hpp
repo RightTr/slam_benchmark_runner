@@ -13,7 +13,7 @@ struct StatusView {
   int sequence{};
   double speed{1.0};
   std::string phase;
-  std::uint64_t published{}, expected{}, received{};
+  std::uint64_t published{}, processed{}, expected{}, received{};
 };
 void printStatus(const StatusView& status);
 

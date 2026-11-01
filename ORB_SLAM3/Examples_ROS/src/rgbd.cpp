@@ -31,6 +31,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <string>
 
 #include<opencv2/core/core.hpp>
@@ -61,7 +62,8 @@ class ImageGrabber
 {
 public:
     ImageGrabber(ORB_SLAM3::System* pSLAM, const rclcpp::Node::SharedPtr& nh, const std::string& settings,
-                 bool offline, int img_size):mpSLAM(pSLAM),
+                 bool offline, int img_size, std::function<void(uint64_t)> progress):mpSLAM(pSLAM),
+                 progress_(std::move(progress)),
                  sync_queue(new SensorSynchronizer<std::pair<sensor_msgs::msg::Image::ConstSharedPtr,sensor_msgs::msg::Image::ConstSharedPtr>>(offline,img_size,1))
     {
         rgbd_sync_tolerance = nh->get_parameter("rgbd_sync_tolerance").as_double();
@@ -82,6 +84,7 @@ public:
     void TrackRGBDFrame(const sensor_msgs::msg::Image::ConstSharedPtr& msgRGB,const sensor_msgs::msg::Image::ConstSharedPtr& msgD);
 
     ORB_SLAM3::System* mpSLAM;
+    std::function<void(uint64_t)> progress_;
     std::unique_ptr<SensorSynchronizer<std::pair<sensor_msgs::msg::Image::ConstSharedPtr,sensor_msgs::msg::Image::ConstSharedPtr>>> sync_queue;
     double rgbd_sync_tolerance{0.02};
     int processing_width{0}, processing_height{0};
@@ -93,15 +96,50 @@ public:
 class BenchmarkSession {
 public:
     void reset(const rclcpp::Node::SharedPtr& node, const std::string& vocabulary,
-               const std::string& settings) {
+               const std::string& settings, std::function<void(uint64_t)> progress) {
         joinFinalizer();
         stopActive();
+        if (grabber_) grabber_->sync_queue->Stop();
+        tracker_ = std::thread{};
+        grabber_.reset();
+        // Destroy the completed System and its viewer before creating the next
+        // map; do not overlap Pangolin or backend state across Sessions.
+        slam_.reset();
+        finalized_=true;
+        RCLCPP_INFO(rclcpp::get_logger("rgbd"),
+                    "Previous ORB-SLAM3 System, viewer, and RGB-D queue cleared");
         slam_=std::make_unique<ORB_SLAM3::System>(vocabulary,settings,ORB_SLAM3::System::RGBD,
             node->get_parameter("use_pangolin").as_bool());
         grabber_=std::make_shared<ImageGrabber>(slam_.get(),node,settings,true,
-            node->get_parameter("img_size").as_int());
+            node->get_parameter("img_size").as_int(),std::move(progress));
         tracker_=std::thread([g=grabber_]{g->ProcessFrames();});
         finalized_=false;
+    }
+    void cancel() {
+        if (grabber_ && !finalized_) {
+            // Drop queued RGB-D frames immediately. The current TrackRGBD call
+            // may finish, but no backlog will be drained before the next RESET.
+            grabber_->sync_queue->Stop();
+            if (!finisher_.joinable() && slam_) {
+                auto* system = slam_.get();
+                finisher_ = std::thread([this, system]() {
+                    try {
+                        if (tracker_.joinable()) tracker_.join();
+                        if (!finalized_) {
+                            system->Shutdown();
+                            finalized_ = true;
+                        }
+                        RCLCPP_INFO(rclcpp::get_logger("rgbd"),
+                                    "Cancelled Session cleanup complete; wrapper is ready for RESET");
+                    } catch (const std::exception& e) {
+                        RCLCPP_ERROR(rclcpp::get_logger("rgbd"),
+                                     "Cancelled Session cleanup failed: %s", e.what());
+                    }
+                });
+            }
+            RCLCPP_INFO(rclcpp::get_logger("rgbd"),
+                        "Session cancelled; queued RGB-D frames discarded, backend cleanup running in background");
+        }
     }
     std::shared_ptr<ImageGrabber> grabber() const { return grabber_; }
     void finish(BenchmarkBridge::Control command, const std::filesystem::path& output_dir,
@@ -116,8 +154,12 @@ public:
                     throw std::runtime_error("final RGB-D pair did not arrive before input drain timeout");
                 grabber->sync_queue->CloseInput();
                 if (tracker_.joinable()) tracker_.join();
+                RCLCPP_INFO(rclcpp::get_logger("rgbd"),
+                            "All input frames tracked; waiting for local mapping and loop closing to finish");
                 system->Shutdown();
                 finalized_=true;
+                RCLCPP_INFO(rclcpp::get_logger("rgbd"),
+                            "SLAM backend stopped; exporting the final camera trajectory");
                 const auto trajectory=(output_dir/(command.session_id+"_trajectory.txt")).string();
                 system->SaveTrajectoryTUM(trajectory);
                 bridge->finishEnd(command,trajectory);
@@ -171,6 +213,7 @@ static int runBenchmark(const rclcpp::Node::SharedPtr& nh,
                 camera_info = std::move(msg);
             });
     BenchmarkSession session;
+    BenchmarkBridge* bridge_ptr=nullptr;
     auto reset=[&]() {
         RCLCPP_INFO(nh->get_logger(), "RESET: loading CameraInfo and preparing session settings");
         std::string session_settings=settings;
@@ -214,12 +257,14 @@ static int runBenchmark(const rclcpp::Node::SharedPtr& nh,
             generated.close();
             if (!generated) throw std::runtime_error("cannot write generated CameraInfo settings");
         RCLCPP_INFO(nh->get_logger(), "RESET: constructing ORB-SLAM3 System (vocabulary loading may take a while)");
-        session.reset(nh,vocabulary,session_settings);
+        session.reset(nh,vocabulary,session_settings,[&](uint64_t processed) {
+            if (bridge_ptr) bridge_ptr->publishProgress(processed);
+        });
         RCLCPP_INFO(nh->get_logger(), "RESET: ORB-SLAM3 System is ready");
     };
-    BenchmarkBridge* bridge_ptr=nullptr;
+    auto cancel=[&]() { session.cancel(); };
     auto end=[&](BenchmarkBridge::Control command) { session.finish(command,output_dir,bridge_ptr); };
-    BenchmarkBridge bridge(nh,reset,end);
+    BenchmarkBridge bridge(nh,reset,cancel,end);
     bridge_ptr=&bridge;
     const std::string rgb_topic="/benchmark/rgb";
     const std::string depth_topic="/benchmark/depth";
@@ -274,6 +319,7 @@ void ImageGrabber::GrabRGBD(const sensor_msgs::msg::Image::ConstSharedPtr& msgRG
 
 void ImageGrabber::ProcessFrames()
 {
+    uint64_t processed_frames = 0;
     while(rclcpp::ok()) {
         std::pair<sensor_msgs::msg::Image::ConstSharedPtr,sensor_msgs::msg::Image::ConstSharedPtr> frame;
         double timestamp=-1.0;
@@ -282,6 +328,7 @@ void ImageGrabber::ProcessFrames()
         catch (const std::exception& e) {
             RCLCPP_ERROR(rclcpp::get_logger("rgbd"), "Frame processing failed: %s",e.what());
         }
+        if (progress_) progress_(++processed_frames);
     }
 }
 

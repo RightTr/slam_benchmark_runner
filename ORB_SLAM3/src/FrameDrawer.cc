@@ -93,7 +93,7 @@ cv::Mat FrameDrawer::DrawFrame(float imageScale)
             thDepth = mThDepth;
 
         }
-        else if(mState==Tracking::LOST)
+        else if(mState==Tracking::RECENTLY_LOST || mState==Tracking::LOST)
         {
             vCurrentKeys = mvCurrentKeys;
         }
@@ -192,6 +192,19 @@ cv::Mat FrameDrawer::DrawFrame(float imageScale)
                     mnTrackedVO++;
                 }
             }
+        }
+    }
+    else if(state==Tracking::RECENTLY_LOST || state==Tracking::LOST)
+    {
+        // Keep showing detected ORB features while map tracking/relocalization
+        // is lost. These are raw image features, not successful map matches.
+        const cv::Scalar color = state==Tracking::RECENTLY_LOST
+            ? cv::Scalar(255,255,0) : cv::Scalar(0,0,255);
+        for(const auto& key:vCurrentKeys)
+        {
+            const cv::Point2f point = imageScale != 1.f
+                ? key.pt / imageScale : key.pt;
+            cv::circle(im,point,2,color,-1,cv::LINE_AA);
         }
     }
 
@@ -350,7 +363,11 @@ void FrameDrawer::DrawTextInfo(cv::Mat &im, int nState, cv::Mat &imText)
     }
     else if(nState==Tracking::LOST)
     {
-        s << " TRACK LOST. TRYING TO RELOCALIZE ";
+        s << " TRACK LOST | RELOCALIZING ";
+    }
+    else if(nState==Tracking::RECENTLY_LOST)
+    {
+        s << " TRACKING LOST TEMPORARILY | RELOCALIZING ";
     }
     else if(nState==Tracking::SYSTEM_NOT_READY)
     {

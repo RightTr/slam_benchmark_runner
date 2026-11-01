@@ -2128,7 +2128,11 @@ void Tracking::Track()
 
             }
             if(!bOK)
-                cout << "Fail to track local map!" << endl;
+                cout << "Fail to track local map: frame=" << mCurrentFrame.mnId
+                     << ", map_inliers=" << mnMatchesInliers
+                     << ", orb_features=" << mCurrentFrame.N
+                     << ", state=" << static_cast<int>(mState)
+                     << ", last_reloc_frame=" << mnLastRelocFrameId << endl;
         }
         else
         {

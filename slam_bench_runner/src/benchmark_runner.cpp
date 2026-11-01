@@ -8,6 +8,7 @@
 #include <nav_msgs/msg/path.hpp>
 #include <slam_bench_msgs/msg/benchmark_control.hpp>
 #include <slam_bench_msgs/msg/benchmark_control_ack.hpp>
+#include <slam_bench_msgs/msg/benchmark_progress.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/core.hpp>
 #include <algorithm>
@@ -55,7 +56,7 @@ class Runner final : public rclcpp::Node {
     switch(p) {
       case Phase::Idle:return "IDLE"; case Phase::Preparing:return "PREPARING";
       case Phase::Playing:return "PLAYING"; case Phase::Paused:return "PAUSED";
-      case Phase::WaitingFinalTrajectory:return "WAIT_FINAL_TRAJECTORY";
+      case Phase::WaitingFinalTrajectory:return "FINALIZING_SLAM";
       case Phase::Cancelling:return "CANCELLING";
       case Phase::Completed:return "COMPLETED"; case Phase::Incomplete:return "INCOMPLETE";
       case Phase::Cancelled:return "CANCELLED"; case Phase::Error:return "ERROR";
@@ -69,17 +70,25 @@ class Runner final : public rclcpp::Node {
     // The release bundle supplies this public key; students only enter their ID.
     teacher_public_key_ = declare_parameter<std::string>("teacher_public_key", "./key/teacher_public.key");
     camera_info_file_ = declare_parameter<std::string>("camera_info_file", "");
+    sequence_archive_paths_ = declare_parameter<std::vector<std::string>>(
+      "sequence_archive_paths", std::vector<std::string>{});
+    sequence_calibration_paths_ = declare_parameter<std::vector<std::string>>(
+      "sequence_calibration_paths", std::vector<std::string>{});
     camera_info_topic_ = declare_parameter<std::string>("camera_info_topic", "/benchmark/camera_info");
     rate_scale_ = declare_parameter<double>("rate_scale", 1.0);
-    final_trajectory_timeout_ms_ = declare_parameter<int>("final_trajectory_timeout_ms", 60000);
+    final_trajectory_timeout_ms_ = declare_parameter<int>("final_trajectory_timeout_ms", 600000);
     ack_timeout_ms_ = declare_parameter<int>("ack_timeout_ms", 5000);
     reset_timeout_ms_ = declare_parameter<int>("reset_timeout_ms", 60000);
     if (dataset_dir_.empty() || rate_scale_ <= 0 || final_trajectory_timeout_ms_ <= 0 ||
         ack_timeout_ms_ <= 0 || reset_timeout_ms_ <= 0)
       throw std::runtime_error("set dataset_dir and valid timing parameters");
+    if ((!sequence_archive_paths_.empty() && sequence_archive_paths_.size()!=6) ||
+        (!sequence_calibration_paths_.empty() && sequence_calibration_paths_.size()!=6))
+      throw std::runtime_error("sequence archive and calibration path lists must each contain six entries");
     fs::create_directories(output_dir_);
     run_uuid_ = slam_bench::BenchmarkCore::generateRunUuid();
     core_.initialize(slam_bench::Mode::Test, dataset_dir_);
+    core_.setSequenceArchivePaths(sequence_archive_paths_);
     core_.setTeacherPublicKey(teacher_public_key_);
     core_.setFinalTrajectoryTimeoutMs(final_trajectory_timeout_ms_);
     auto image_qos = rclcpp::QoS(rclcpp::KeepLast(5)).reliable();
@@ -93,6 +102,9 @@ class Runner final : public rclcpp::Node {
       [this](slam_bench_msgs::msg::BenchmarkControlAck::ConstSharedPtr msg) { onAck(*msg); });
     trajectory_sub_ = create_subscription<nav_msgs::msg::Path>("/benchmark/trajectory_final", 1,
       [this](nav_msgs::msg::Path::ConstSharedPtr msg) { onFinalPath(*msg); });
+    progress_sub_ = create_subscription<slam_bench_msgs::msg::BenchmarkProgress>(
+      "/benchmark/progress", rclcpp::QoS(10).reliable(),
+      [this](slam_bench_msgs::msg::BenchmarkProgress::ConstSharedPtr msg) { onProgress(*msg); });
   }
   ~Runner() override { stop(); wait(); }
   void wait() { if (worker_.joinable()) worker_.join(); }
@@ -136,8 +148,9 @@ class Runner final : public rclcpp::Node {
       if (!valid_student_id) throw std::runtime_error("student ID must contain exactly 13 digits");
       student_id_=student_id;
     }
-    mode_ = mode; if (mode_==slam_bench::Mode::Evaluation) rate_scale_=1.0;
+    mode_ = mode;
     core_.initialize(mode_,dataset_dir_); phase_=Phase::Idle;
+    core_.setSequenceArchivePaths(sequence_archive_paths_);
     core_.setTeacherPublicKey(teacher_public_key_);
   }
   void select(int id) {
@@ -183,14 +196,21 @@ class Runner final : public rclcpp::Node {
     paused_=false; phase_=playback_started_?Phase::Playing:Phase::Preparing; cv_.notify_all();
   }
   void cancel() {
+    slam_bench_msgs::msg::BenchmarkControl message;
     {
       std::lock_guard<std::mutex> lock(mu_);
       if (!running_) throw std::runtime_error("no active run to cancel");
       if (stop_) return;
       stop_=true;
       phase_=Phase::Cancelling;
+      message.command=slam_bench_msgs::msg::BenchmarkControl::CANCEL;
+      message.command_id=++command_id_;
+      message.run_uuid=run_uuid_;
+      message.session_id=session_id_;
+      message.evaluation_mode=(mode_==slam_bench::Mode::Evaluation);
     }
     cv_.notify_all();
+    control_pub_->publish(message);
   }
   void stop() {
     if (isRunning()) cancel();
@@ -209,6 +229,7 @@ class Runner final : public rclcpp::Node {
       view.running=running_;
       view.progress_known=playback_started_;
       view.published=progress.published_frames;
+      view.processed=processed_frames_;
       view.expected=progress.expected_frames;
       view.received=progress.received_frames;
     }
@@ -261,6 +282,11 @@ class Runner final : public rclcpp::Node {
     trajectory_path_=m; trajectory_received_=true;
     cv_.notify_all();
   }
+  void onProgress(const slam_bench_msgs::msg::BenchmarkProgress& m) {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (m.run_uuid!=run_uuid_ || m.session_id!=session_id_) return;
+    processed_frames_=std::max(processed_frames_,m.processed_frames);
+  }
   bool awaitFinal(uint64_t id) {
     std::unique_lock<std::mutex> lock(mu_);
     ack_command_=slam_bench_msgs::msg::BenchmarkControl::END;
@@ -269,12 +295,16 @@ class Runner final : public rclcpp::Node {
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(final_trajectory_timeout_ms_);
     cv_.wait_until(lock,deadline,[this]{return stop_.load() || (acked_ && !ack_accepted_) ||
       (acked_ && trajectory_received_);});
+    if (acked_ && !ack_accepted_)
+      throw std::runtime_error("ORB-SLAM3 rejected END: " + ack_detail_);
     return !stop_ && acked_ && ack_accepted_ && trajectory_received_;
   }
   sensor_msgs::msg::CameraInfo loadCameraInfo(int sequence_id) const {
-    const fs::path file=camera_info_file_.empty()
-      ? fs::path(dataset_dir_)/("sequence_0"+std::to_string(sequence_id))/"calibration.yaml"
-      : fs::path(camera_info_file_);
+    const fs::path file=!sequence_calibration_paths_.empty()
+      ? fs::path(sequence_calibration_paths_.at(static_cast<size_t>(sequence_id-1)))
+      : (camera_info_file_.empty()
+          ? fs::path(dataset_dir_)/("sequence_0"+std::to_string(sequence_id))/"calibration.yaml"
+          : fs::path(camera_info_file_));
     cv::FileStorage settings(file.string(),cv::FileStorage::READ);
     if (!settings.isOpened()) throw std::runtime_error("cannot read camera calibration: "+file.string());
     sensor_msgs::msg::CameraInfo info;
@@ -291,10 +321,15 @@ class Runner final : public rclcpp::Node {
     const cv::FileNode camera_matrix=settings["camera_matrix"];
     if (!camera_matrix.empty()) camera_matrix>>k;
     if (k.total()>=9) {
+      k.convertTo(k,CV_64F);
       k=k.reshape(1,1); for(int i=0;i<9;++i) info.k[i]=k.at<double>(0,i);
     } else {
-      settings["Camera.fx"]>>info.k[0];settings["Camera.cx"]>>info.k[2];
-      settings["Camera.fy"]>>info.k[4];settings["Camera.cy"]>>info.k[5];info.k[8]=1.0;
+      const char* fx=settings["Camera.fx"].empty()?"Camera1.fx":"Camera.fx";
+      const char* fy=settings["Camera.fy"].empty()?"Camera1.fy":"Camera.fy";
+      const char* cx=settings["Camera.cx"].empty()?"Camera1.cx":"Camera.cx";
+      const char* cy=settings["Camera.cy"].empty()?"Camera1.cy":"Camera.cy";
+      settings[fx]>>info.k[0];settings[cx]>>info.k[2];
+      settings[fy]>>info.k[4];settings[cy]>>info.k[5];info.k[8]=1.0;
     }
     info.r[0]=info.r[4]=info.r[8]=1.0;
     info.p[0]=info.k[0];info.p[2]=info.k[2];info.p[5]=info.k[4];info.p[6]=info.k[5];info.p[10]=1.0;
@@ -303,13 +338,17 @@ class Runner final : public rclcpp::Node {
     if (!distortion.empty()) distortion>>d;
     if (d.empty()) {
       double values[5]{};
-      const char* distortion_keys[]={"Camera.k1","Camera.k2","Camera.p1","Camera.p2","Camera.k3"};
+      const char* distortion_keys[]={
+        settings["Camera.k1"].empty()?"Camera1.k1":"Camera.k1",
+        settings["Camera.k2"].empty()?"Camera1.k2":"Camera.k2",
+        settings["Camera.p1"].empty()?"Camera1.p1":"Camera.p1",
+        settings["Camera.p2"].empty()?"Camera1.p2":"Camera.p2",
+        settings["Camera.k3"].empty()?"Camera1.k3":"Camera.k3"};
       bool has_distortion=false;
       for (const char* key:distortion_keys) has_distortion=has_distortion||!settings[key].empty();
-      settings["Camera.k1"]>>values[0];settings["Camera.k2"]>>values[1];
-      settings["Camera.p1"]>>values[2];settings["Camera.p2"]>>values[3];settings["Camera.k3"]>>values[4];
+      for(size_t i=0;i<5;++i) settings[distortion_keys[i]]>>values[i];
       if (has_distortion) for(double v:values) info.d.push_back(v);
-    } else { d=d.reshape(1,1);for(int i=0;i<static_cast<int>(d.total());++i) info.d.push_back(d.at<double>(0,i)); }
+    } else { d.convertTo(d,CV_64F);d=d.reshape(1,1);for(int i=0;i<static_cast<int>(d.total());++i) info.d.push_back(d.at<double>(0,i)); }
     if (!info.width||!info.height||info.k[0]<=0||info.k[4]<=0)
       throw std::runtime_error("calibration must define dimensions and positive focal lengths");
     return info;
@@ -397,6 +436,10 @@ class Runner final : public rclcpp::Node {
                       fs::path& session_output_dir) {
         core_.selectSequence(seq);
         { std::lock_guard<std::mutex> lock(mu_); selected_=seq; session_id_=slam_bench::BenchmarkCore::generateRunUuid();
+          processed_frames_=0;
+          expected_final_stamp_=0;
+          trajectory_received_=false;
+          trajectory_path_=nav_msgs::msg::Path{};
           if (completed_sessions>0) { paused_=false;playback_started_=false;paused_total_ns_=0; }
           phase_=paused_?Phase::Paused:Phase::Preparing; }
         std::ostringstream session_name;
@@ -432,8 +475,12 @@ class Runner final : public rclcpp::Node {
           phase_=Phase::WaitingFinalTrajectory;
           expected_final_stamp_=awaiting.last_image_stamp_ns;
           trajectory_received_=false; }
+        std::cout << "\n  " << slam_bench::cli::paint(
+          "All images sent. Waiting for ORB-SLAM3 to drain frames, finish mapping/loop closure, and close the viewer. Keep the process running.",
+          "38;5;214") << '\n' << std::flush;
         if (!awaitFinal(++command_id_))
-          throw std::runtime_error("END export or final trajectories timeout");
+          throw std::runtime_error("END ACK and final camera trajectory were not both received within " +
+                                   std::to_string(final_trajectory_timeout_ms_) + " ms");
         nav_msgs::msg::Path final_path;
         { std::lock_guard<std::mutex> lock(mu_); final_path=trajectory_path_; }
         std::vector<slam_bench::FinalPose> final_poses;
@@ -512,11 +559,13 @@ class Runner final : public rclcpp::Node {
     { std::lock_guard<std::mutex> lock(mu_); running_=false; }
   }
   std::string dataset_dir_,output_dir_,student_id_,teacher_public_key_,camera_info_file_,camera_info_topic_,run_uuid_,session_id_;
+  std::vector<std::string> sequence_archive_paths_,sequence_calibration_paths_;
   slam_bench::BenchmarkCore core_; slam_bench::BenchmarkInput input_{core_};
   slam_bench::BenchmarkOutput output_{core_}; slam_bench::Mode mode_{slam_bench::Mode::Test};
-  double rate_scale_{1};int final_trajectory_timeout_ms_{60000},ack_timeout_ms_{5000},reset_timeout_ms_{60000},selected_{1};
-  uint64_t command_id_{0},ack_id_{0}; uint8_t ack_command_{0};bool acked_{false},ack_accepted_{false},running_{false};
+  double rate_scale_{1};int final_trajectory_timeout_ms_{600000},ack_timeout_ms_{5000},reset_timeout_ms_{60000},selected_{1};
+  std::atomic<uint64_t> command_id_{0}; uint64_t ack_id_{0}; uint8_t ack_command_{0};bool acked_{false},ack_accepted_{false},running_{false};
   std::string ack_detail_;
+  uint64_t processed_frames_{0};
   int64_t expected_final_stamp_{0}; bool trajectory_received_{false};
   nav_msgs::msg::Path trajectory_path_;
   Phase phase_{Phase::Idle}; bool paused_{false},playback_started_{false}; int64_t pause_started_ns_{0},paused_total_ns_{0};
@@ -527,6 +576,7 @@ class Runner final : public rclcpp::Node {
   rclcpp::Publisher<slam_bench_msgs::msg::BenchmarkControl>::SharedPtr control_pub_;
   rclcpp::Subscription<slam_bench_msgs::msg::BenchmarkControlAck>::SharedPtr ack_sub_;
   rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr trajectory_sub_;
+  rclcpp::Subscription<slam_bench_msgs::msg::BenchmarkProgress>::SharedPtr progress_sub_;
 };
 int runBenchmarkMain(int argc,char** argv) {
   rclcpp::init(argc,argv);std::shared_ptr<Runner> runner;

@@ -298,17 +298,17 @@ MenuResult choosePlaybackSpeed(double& speed) {
 
 MenuResult confirmEvaluationStart() {
   std::cout << '\n' << paint("  ╭─ Evaluation run ────────────────────────────────────╮", "38;5;45") << '\n'
-            << "  │ Six sequences will run in a randomized order.        │\n"
+            << "  │ Seven sequences will run in a randomized order.      │\n"
             << paint("  ╰──────────────────────────────────────────────────────╯", "38;5;45") << '\n';
   RawTerminal raw;
   if (!raw.active()) {
-    prompt("press Enter to start · blank line › ");
+    prompt("press Enter to choose playback speed · blank line › ");
     std::string answer;
-    const auto result = readLine(answer,"press Enter to start · blank line › ",false);
+    const auto result = readLine(answer,"press Enter to choose playback speed · blank line › ",false);
     if (result == InputResult::Interrupt) return MenuResult::Interrupt;
     return result == InputResult::Line && answer.empty() ? MenuResult::Confirmed : MenuResult::Cancelled;
   }
-  std::cout << "  Press " << paint("Enter", "1;38;5;82") << " to start or "
+  std::cout << "  Press " << paint("Enter", "1;38;5;82") << " to choose playback speed or "
             << paint("Esc", "1;38;5;214") << " to cancel.\n";
   while (true) {
     const Key key = readKey();
@@ -503,8 +503,8 @@ void printMetrics(double ate, double rte, double rotation, double tracking) {
 }
 
 void printStatus(const StatusView& status) {
-  const auto sent=std::min(status.published,status.expected);
-  const int percent=status.expected?static_cast<int>(sent*100/status.expected):0;
+  const auto processed=std::min(status.processed,status.expected);
+  const int percent=status.expected?static_cast<int>(processed*100/status.expected):0;
   constexpr size_t bar_width=24;
   const size_t filled=static_cast<size_t>(percent)*bar_width/100;
   const std::string bar=status.progress_known
@@ -512,9 +512,9 @@ void printStatus(const StatusView& status) {
     : (status.running?"Preparing dataset...":"[------------------------] 0%");
   std::cout << '\n' << paint("  ╭─ Session status ────────────────────────────────────╮", "38;5;45") << '\n';
   auto row=[&](const std::string& label,const std::string& value,const char* color=nullptr) {
-    std::cout << "  │ " << std::left << std::setw(11) << label;
+    std::cout << "  │ " << std::left << std::setw(11) << label << ' ';
     if (color) std::cout << paint(value,color); else std::cout << value;
-    const size_t used=15+value.size();
+    const size_t used=16+value.size();
     if (used<56) std::cout << std::string(56-used,' ');
     std::cout << "│\n";
   };
@@ -526,9 +526,14 @@ void printStatus(const StatusView& status) {
   }
   row("Phase",status.phase);
   row("SLAM link",status.connected?"● connected":"○ waiting",status.connected?"38;5;82":"38;5;214");
-  row("Progress",bar,"38;5;45");
-  row("Images",std::to_string(status.published)+" / "+std::to_string(status.expected)+" published");
-  row("Trajectory",std::to_string(status.received)+" poses received");
+  row("Processed",bar,"38;5;45");
+  row("Images sent",std::to_string(status.published)+" / "+std::to_string(status.expected));
+  if (status.phase=="FINALIZING_SLAM")
+    row("Final poses","waiting for ORB-SLAM3 export");
+  else if (status.running)
+    row("Final poses","published after END");
+  else
+    row("Final poses",std::to_string(status.received)+" poses received");
   std::cout << paint("  ╰──────────────────────────────────────────────────────╯", "38;5;45") << "\n\n";
 }
 
@@ -617,10 +622,21 @@ int Console::run() {
         if (choice == MenuResult::Interrupt) {
           if (confirmExit(actions_.is_running())) return 0;
         } else if (choice == MenuResult::Confirmed) {
-          actions_.evaluation(student_id);
-          actions_.play();
-          saw_active_run = true;
-          std::cout << paint("  ▶  Evaluation queued · waiting for SLAM", "1;38;5;82") << "\n\n";
+          double speed=1.0;
+          const auto speed_choice=choosePlaybackSpeed(speed);
+          if (speed_choice==MenuResult::Interrupt) {
+            if (confirmExit(actions_.is_running())) return 0;
+            home();
+          } else if (speed_choice==MenuResult::Confirmed) {
+            home();
+            actions_.set_speed(speed);
+            actions_.evaluation(student_id);
+            actions_.play();
+            saw_active_run = true;
+            std::ostringstream queued;
+            queued << "  ▶  Evaluation queued · " << speed << "× · waiting for SLAM";
+            std::cout << paint(queued.str(),"1;38;5;82") << "\n\n";
+          } else home();
         }
       } else if (command == "select") {
         int id{};

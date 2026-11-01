@@ -3,18 +3,40 @@
 #include <stdexcept>
 
 BenchmarkBridge::BenchmarkBridge(const rclcpp::Node::SharedPtr& node,
-    std::function<void()> reset, std::function<void(Control)> end)
-    : node_(node), reset_(std::move(reset)), end_(std::move(end))
+    std::function<void()> reset, std::function<void()> cancel,
+    std::function<void(Control)> end)
+    : node_(node), reset_(std::move(reset)), cancel_(std::move(cancel)), end_(std::move(end))
 {
     ack_pub_ = node_->create_publisher<slam_bench_msgs::msg::BenchmarkControlAck>(
         "/benchmark/control_ack", 10);
+    progress_pub_ = node_->create_publisher<slam_bench_msgs::msg::BenchmarkProgress>(
+        "/benchmark/progress", rclcpp::QoS(10).reliable());
     trajectory_pub_ = node_->create_publisher<nav_msgs::msg::Path>(
         "/benchmark/trajectory_final", 1);
     control_sub_ = node_->create_subscription<Control>("/benchmark/control", 10,
         [this](Control::ConstSharedPtr m) {
             try {
                 if (m->command == Control::READY) { ack(*m, true, "ready"); return; }
-                if (m->command == Control::RESET) {
+                if (m->command == Control::CANCEL) {
+                    bool session_matches = false;
+                    {
+                        std::lock_guard<std::mutex> lock(mutex_);
+                        session_matches = run_ == m->run_uuid && session_ == m->session_id;
+                        if (session_matches) {
+                            accepting_ = false;
+                            ending_ = false;
+                            has_reset_ = false;
+                            stamps_.clear();
+                            expected_final_stamp_ns_ = 0;
+                            final_input_seen_ = false;
+                            cancelled_ = true;
+                        }
+                    }
+                    if (!session_matches) { ack(*m, false, "session mismatch"); return; }
+                    stamp_cv_.notify_all();
+                    cancel_();
+                    ack(*m, true, "queued frames discarded; ORB-SLAM3 kept running");
+                } else if (m->command == Control::RESET) {
                     RCLCPP_INFO(node_->get_logger(),
                         "RESET received (command_id=%lu, session=%s)",
                         static_cast<unsigned long>(m->command_id), m->session_id.c_str());
@@ -23,15 +45,20 @@ BenchmarkBridge::BenchmarkBridge(const rclcpp::Node::SharedPtr& node,
                           run_==m->run_uuid && session_==m->session_id) {
                           ack(*m,true,"reset complete"); return;
                       }
-                      accepting_ = false; }
+                      accepting_ = false;
+                      ending_ = false;
+                      stamps_.clear();
+                      run_ = m->run_uuid; session_ = m->session_id;
+                      has_reset_ = false; has_completed_end_ = false;
+                      expected_final_stamp_ns_ = 0; final_input_seen_ = false; cancelled_ = false; }
                     RCLCPP_INFO(node_->get_logger(), "RESET: initializing ORB-SLAM3 System");
                     reset_();
                     RCLCPP_INFO(node_->get_logger(), "RESET: ORB-SLAM3 System initialized; sending ACK");
                     { std::lock_guard<std::mutex> lock(mutex_);
-                      stamps_.clear(); run_ = m->run_uuid; session_ = m->session_id;
+                      run_ = m->run_uuid; session_ = m->session_id;
                       reset_command_id_=m->command_id;has_reset_=true;
                       has_completed_end_=false; ending_=false;
-                      expected_final_stamp_ns_=0; final_input_seen_=false; }
+                      expected_final_stamp_ns_=0; final_input_seen_=false; cancelled_=false; }
                     ack(*m, true, "reset complete");
                 } else if (m->command == Control::BEGIN) {
                     { std::lock_guard<std::mutex> lock(mutex_);
@@ -81,10 +108,22 @@ void BenchmarkBridge::registerInputStamp(const builtin_interfaces::msg::Time& st
         stamp_cv_.notify_all();
     }
 }
+void BenchmarkBridge::publishProgress(uint64_t processed_frames) {
+    slam_bench_msgs::msg::BenchmarkProgress progress;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        progress.run_uuid = run_;
+        progress.session_id = session_;
+    }
+    if (progress.run_uuid.empty() || progress.session_id.empty()) return;
+    progress.processed_frames = processed_frames;
+    progress_pub_->publish(progress);
+}
 bool BenchmarkBridge::waitForInputStamp(int64_t stamp_ns,std::chrono::milliseconds timeout) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (stamp_ns!=expected_final_stamp_ns_) return false;
-    return stamp_cv_.wait_for(lock,timeout,[this]{return final_input_seen_;});
+    stamp_cv_.wait_for(lock,timeout,[this]{return final_input_seen_ || cancelled_;});
+    return final_input_seen_ && !cancelled_;
 }
 void BenchmarkBridge::ack(const Control& m, bool accepted, const std::string& detail) {
     slam_bench_msgs::msg::BenchmarkControlAck a;
@@ -101,13 +140,6 @@ void BenchmarkBridge::finishEnd(const Control& m, const std::string& trajectory_
         ack(m,true,"loop-closed camera trajectory published");
         std::lock_guard<std::mutex> lock(mutex_); ending_=false;
         has_completed_end_=true; completed_end_command_id_=m.command_id;
-        if (!m.evaluation_mode) {
-            shutdown_timer_=node_->create_wall_timer(std::chrono::milliseconds(750), [] {
-                RCLCPP_INFO(rclcpp::get_logger("benchmark_bridge"),
-                            "Test complete; shutting down ORB-SLAM3 ROS node");
-                rclcpp::shutdown();
-            });
-        }
     } catch (const std::exception& e) {
         { std::lock_guard<std::mutex> lock(mutex_); ending_=false; }
         ack(m,false,e.what());

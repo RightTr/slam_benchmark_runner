@@ -2,6 +2,7 @@ uint8 READY=1
 uint8 RESET=2
 uint8 BEGIN=3
 uint8 END=4
+uint8 CANCEL=5
 uint8 command
 uint64 command_id
 string run_uuid

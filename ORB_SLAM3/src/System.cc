@@ -43,6 +43,11 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
     mSensor(sensor), mpViewer(static_cast<Viewer*>(NULL)), mbReset(false), mbResetActiveMap(false),
     mbActivateLocalizationMode(false), mbDeactivateLocalizationMode(false), mbShutDown(false)
 {
+    // Frame keeps camera intrinsics and image bounds in process-wide static
+    // fields. A new System may use another sequence's calibration, so force
+    // the first Frame of every System to rebuild that cache.
+    Frame::mbInitialComputations = true;
+
     // Output welcome message
     cout << endl <<
     "ORB-SLAM3 Copyright (C) 2017-2020 Carlos Campos, Richard Elvira, Juan J. Gómez, José M.M. Montiel and Juan D. Tardós, University of Zaragoza." << endl <<
@@ -519,7 +524,7 @@ void System::Shutdown()
         mbShutDown = true;
     }
 
-    cout << "Shutdown" << endl;
+    cout << "Shutdown requested; waiting for SLAM workers..." << endl;
 
     mpLocalMapper->RequestFinish();
     mpLoopCloser->RequestFinish();
@@ -542,6 +547,8 @@ void System::Shutdown()
         mptLoopClosing->join();
     if(mpViewer && mptViewer && mptViewer->joinable())
         mptViewer->join();
+
+    cout << "Shutdown complete" << endl;
 
     if(!mStrSaveAtlasToFile.empty())
     {
@@ -593,10 +600,17 @@ void System::SaveTrajectoryTUM(const string &filename)
     list<ORB_SLAM3::KeyFrame*>::iterator lRit = mpTracker->mlpReferences.begin();
     list<double>::iterator lT = mpTracker->mlFrameTimes.begin();
     list<bool>::iterator lbL = mpTracker->mlbLost.begin();
+    double last_exported_timestamp = 0.0;
+    bool has_exported_timestamp = false;
     for(list<Sophus::SE3f>::iterator lit=mpTracker->mlRelativeFramePoses.begin(),
         lend=mpTracker->mlRelativeFramePoses.end();lit!=lend;lit++, lRit++, lT++, lbL++)
     {
         if(*lbL)
+            continue;
+
+        // Tracking may append the previous pose and timestamp when the current
+        // frame has no pose yet. Do not export that cached placeholder again.
+        if (has_exported_timestamp && *lT <= last_exported_timestamp)
             continue;
 
         KeyFrame* pKF = *lRit;
@@ -619,6 +633,8 @@ void System::SaveTrajectoryTUM(const string &filename)
         Eigen::Quaternionf q = Twc.unit_quaternion();
 
         f << setprecision(6) << *lT << " " <<  setprecision(9) << twc(0) << " " << twc(1) << " " << twc(2) << " " << q.x() << " " << q.y() << " " << q.z() << " " << q.w() << endl;
+        last_exported_timestamp = *lT;
+        has_exported_timestamp = true;
     }
     f.close();
     // cout << endl << "trajectory saved!" << endl;

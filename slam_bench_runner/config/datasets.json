@@ -1,0 +1,35 @@
+{
+  "dataset_dir": "/media/right/Elements SE1/bench_dataset",
+  "sequences": [
+    {
+      "id": 1,
+      "archive": "sequence_01.bench",
+      "calibration": "sequence_01/calibration.yaml"
+    },
+    {
+      "id": 2,
+      "archive": "sequence_02.bench",
+      "calibration": "sequence_02/calibration.yaml"
+    },
+    {
+      "id": 3,
+      "archive": "sequence_03.bench",
+      "calibration": "sequence_03/calibration.yaml"
+    },
+    {
+      "id": 4,
+      "archive": "sequence_04.bench",
+      "calibration": "sequence_04/calibration.yaml"
+    },
+    {
+      "id": 5,
+      "archive": "sequence_05.bench",
+      "calibration": "sequence_05/calibration.yaml"
+    },
+    {
+      "id": 6,
+      "archive": "sequence_06.bench",
+      "calibration": "sequence_06/calibration.yaml"
+    }
+  ]
+}
