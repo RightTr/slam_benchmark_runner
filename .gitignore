@@ -52,6 +52,5 @@ CMakeCache.txt
 .idea/
 .DS_Store
 
-# CLI implementation is distributed only as a compiled library
+# CLI implementation stays local and is compiled into libslam_bench_cli.so.
 /slam_bench_runner/src/cli.cpp
-/slam_bench_runner/src/cli.hpp
