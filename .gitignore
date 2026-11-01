@@ -1,9 +1,11 @@
-# Teacher secrets: never commit encryption/signing keys
-/key/
+# Teacher secrets; the teacher public key is safe to distribute
 **/key/
 *.key
 *.pem
 *.priv
+!/key/
+/key/*
+!/key/teacher_public.key
 
 # Raw datasets and plaintext ground truth
 /data/rgbd_dataset_*/
