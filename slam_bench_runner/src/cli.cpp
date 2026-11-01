@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <iomanip>
 #include <ostream>
 #include <poll.h>
 #include <sstream>
@@ -474,6 +475,61 @@ void home(bool show_banner = false) {
 
 std::string paint(const std::string& text, const char* code) {
   return colorEnabled() ? std::string("\033[") + code + "m" + text + "\033[0m" : text;
+}
+
+void printMetrics(double ate, double rte, double rotation, double tracking) {
+  auto value = [](double number, int precision) {
+    if (!std::isfinite(number)) return std::string("N/A");
+    std::ostringstream out;
+    out << std::fixed << std::setprecision(precision) << number;
+    return out.str();
+  };
+  auto row = [&](const char* name, double number, int precision, const char* unit) {
+    std::cout << "  │ " << std::left << std::setw(23) << name << "│ "
+              << std::right << std::setw(13) << value(number, precision) << " │ "
+              << std::left << std::setw(6) << unit << " │\n";
+  };
+  std::cout << "\n  Loop-closed camera trajectory results\n"
+            << paint("  ╭────────────────────────┬───────────────┬────────╮", "38;5;45") << '\n'
+            << "  │ " << std::left << std::setw(23) << "Metric" << "│ "
+            << std::right << std::setw(13) << "Value" << " │ "
+            << std::left << std::setw(6) << "Unit" << " │\n"
+            << paint("  ├────────────────────────┼───────────────┼────────┤", "38;5;45") << '\n';
+  row("ATE RMSE", ate, 8, "m");
+  row("RTE RMSE", rte, 8, "m");
+  row("Rotation RPE", rotation, 6, "deg");
+  row("Tracking", tracking * 100.0, 2, "%");
+  std::cout << paint("  ╰────────────────────────┴───────────────┴────────╯", "38;5;45") << '\n';
+}
+
+void printStatus(const StatusView& status) {
+  const auto sent=std::min(status.published,status.expected);
+  const int percent=status.expected?static_cast<int>(sent*100/status.expected):0;
+  constexpr size_t bar_width=24;
+  const size_t filled=static_cast<size_t>(percent)*bar_width/100;
+  const std::string bar=status.progress_known
+    ? "["+std::string(filled,'#')+std::string(bar_width-filled,'-')+"] "+std::to_string(percent)+"%"
+    : (status.running?"Preparing dataset...":"[------------------------] 0%");
+  std::cout << '\n' << paint("  ╭─ Session status ────────────────────────────────────╮", "38;5;45") << '\n';
+  auto row=[&](const std::string& label,const std::string& value,const char* color=nullptr) {
+    std::cout << "  │ " << std::left << std::setw(11) << label;
+    if (color) std::cout << paint(value,color); else std::cout << value;
+    const size_t used=15+value.size();
+    if (used<56) std::cout << std::string(56-used,' ');
+    std::cout << "│\n";
+  };
+  row("Mode",status.test_mode?"Test":"Evaluation");
+  row("Sequence",status.test_mode?std::to_string(status.sequence):"Randomized (six sessions)");
+  if (status.test_mode) {
+    std::ostringstream speed; speed << status.speed << "×";
+    row("Speed",speed.str());
+  }
+  row("Phase",status.phase);
+  row("SLAM link",status.connected?"● connected":"○ waiting",status.connected?"38;5;82":"38;5;214");
+  row("Progress",bar,"38;5;45");
+  row("Images",std::to_string(status.published)+" / "+std::to_string(status.expected)+" published");
+  row("Trajectory",std::to_string(status.received)+" poses received");
+  std::cout << paint("  ╰──────────────────────────────────────────────────────╯", "38;5;45") << "\n\n";
 }
 
 Console::Console(Actions actions) : actions_(std::move(actions)) {}

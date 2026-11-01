@@ -7,7 +7,6 @@ ROS_SETUP="${ROS_SETUP:-/opt/ros/humble/setup.bash}"
 OVERLAY_SETUP="$WORKSPACE_ROOT/install/setup.bash"
 
 DATASET_DIR="${SLAM_BENCH_DATASET_DIR:-$SCRIPT_DIR/data/encrypted}"
-KEY_FILE="${SLAM_BENCH_KEY_FILE:-$SCRIPT_DIR/key/dataset_aes256.key}"
 OUTPUT_DIR="${SLAM_BENCH_OUTPUT_DIR:-$SCRIPT_DIR/slam_bench_runs}"
 TEACHER_PUBLIC_KEY="${SLAM_BENCH_TEACHER_PUBLIC_KEY:-$SCRIPT_DIR/key/teacher_public.key}"
 
@@ -22,10 +21,6 @@ if [[ ! -f "$OVERLAY_SETUP" ]]; then
 fi
 if [[ ! -f "$DATASET_DIR/sequence_01.bench" ]]; then
   echo "Encrypted dataset not found under: $DATASET_DIR" >&2
-  exit 2
-fi
-if [[ ! -f "$KEY_FILE" ]]; then
-  echo "Dataset key not found: $KEY_FILE" >&2
   exit 2
 fi
 if [[ ! -f "$TEACHER_PUBLIC_KEY" ]]; then
@@ -43,7 +38,6 @@ cd "$WORKSPACE_ROOT"
 
 ROS_ARGS=(
   -p "dataset_dir:=$DATASET_DIR"
-  -p "dataset_key_file:=$KEY_FILE"
   -p "output_dir:=$OUTPUT_DIR"
 )
 ROS_ARGS+=( -p "teacher_public_key:=$TEACHER_PUBLIC_KEY" )

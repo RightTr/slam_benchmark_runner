@@ -1,11 +1,21 @@
 #pragma once
 
 #include <functional>
+#include <cstdint>
 #include <string>
 
 namespace slam_bench::cli {
 
 std::string paint(const std::string& text, const char* ansi_code);
+void printMetrics(double ate_rmse, double rte_rmse, double rotation_rpe, double tracking_ratio);
+struct StatusView {
+  bool test_mode{}, connected{}, running{}, progress_known{};
+  int sequence{};
+  double speed{1.0};
+  std::string phase;
+  std::uint64_t published{}, expected{}, received{};
+};
+void printStatus(const StatusView& status);
 
 struct Actions {
   std::function<void()> test;

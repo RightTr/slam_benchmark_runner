@@ -41,8 +41,7 @@ class SLAM_BENCH_API BenchmarkCore {
   BenchmarkCore& operator=(BenchmarkCore&&) noexcept;
   BenchmarkCore(const BenchmarkCore&) = delete;
   BenchmarkCore& operator=(const BenchmarkCore&) = delete;
-  void initialize(Mode mode, const std::string& dataset_dir,
-                  const std::string& dataset_key_file = "./key/dataset_aes256.key");
+  void initialize(Mode mode, const std::string& dataset_dir);
   void selectSequence(int sequence_id);
   std::vector<int> sequenceOrder() const;
   void beginSession(const std::string& run_uuid, const std::string& session_id);

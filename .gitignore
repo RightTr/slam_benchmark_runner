@@ -20,6 +20,7 @@
 /slam_bench_runner/teacher/
 /slam_bench_runner/src/generated_groundtruth.cpp
 /slam_bench_runner/src/embedded_groundtruth.hpp
+/slam_bench_runner/src/embedded_dataset_key.hpp
 /slam_bench_runner/src/benchmark_core.cpp
 /slam_bench_runner/src/benchmark_input.cpp
 /slam_bench_runner/src/benchmark_output.cpp
