@@ -54,9 +54,6 @@ source install/setup.bash
 colcon build --base-paths src/slam_benchmark_runner/slam_bench_runner \
   --packages-select slam_bench_runner
 source install/setup.bash
-ros2 pkg prefix orb_slam3
-ros2 pkg prefix slam_bench_msgs
-ros2 pkg prefix slam_bench_runner
 cd src/slam_benchmark_runner
 ```
 
