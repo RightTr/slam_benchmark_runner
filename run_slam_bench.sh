@@ -62,6 +62,10 @@ set +u
 source "$ROS_SETUP"
 source "$OVERLAY_SETUP"
 set -u
+PANGOLIN_LIB="$WORKSPACE_ROOT/build/pangolin_install/lib"
+if [[ -d "$PANGOLIN_LIB" ]]; then
+  export LD_LIBRARY_PATH="$PANGOLIN_LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
 mkdir -p "$OUTPUT_DIR"
 cd "$WORKSPACE_ROOT"
 

@@ -4,6 +4,7 @@
 # Unignore all with extensions
 !*.*
 !COLCON_IGNORE
+!LICENSE
 
 # Unignore all dirs
 !*/
@@ -80,8 +81,8 @@ LBA_Stats.txt
 LocalMapTimeStats.txt
 TrackLocalMapStats.txt
 TrackingTimeStats.txt
-time*
-Time*
+/time*
+/Time*
 Table_Euroc
 Table_TUMVI_rooms/
 *.pyc

@@ -21,21 +21,11 @@ SLAM-Bench Runner 是**机器人视觉与导航**课程作业使用的离线 RGB
 sudo apt update
 sudo apt install build-essential cmake git python3-colcon-common-extensions \
   libopencv-dev libeigen3-dev libboost-serialization-dev libssl-dev \
-  libsodium23 libzstd1
+  libsodium23 libzstd1 libgl1-mesa-dev libegl1-mesa-dev \
+  libepoxy-dev libglew-dev libx11-dev pkg-config
 ```
 
-ORB-SLAM3 的查看器还需要 **Pangolin**。若尚未安装，可按 [Pangolin 项目文档](https://github.com/stevenlovegrove/Pangolin/blob/master/README.md)编译安装：
-
-```bash
-git clone --recursive https://github.com/stevenlovegrove/Pangolin.git
-cd Pangolin
-./scripts/install_prerequisites.sh recommended
-cmake -S . -B build
-cmake --build build --parallel 4
-sudo cmake --install build
-sudo ldconfig
-cd ..
-```
+ORB-SLAM3 的查看器还需要 **Pangolin**。本仓库已将 Pangolin v0.9.6 放在 `ORB_SLAM3/Thirdparty/Pangolin`；`build_ros.sh` 会自动编译到工作区的 `build/pangolin_install`，无需另行克隆或安装到系统目录。这个 C++ 评测程序不使用 Pangolin 可选的 Python 和 vcpkg 子模块；参见[源码说明](ORB_SLAM3/Thirdparty/Pangolin/VENDORED_FROM.md)和 [Pangolin 项目文档](https://github.com/stevenlovegrove/Pangolin/blob/master/README.md)。
 
 Pangolin 会打开图形查看器，因此运行评测需要可用的桌面与 OpenGL 显示环境。本仓库的 ORB-SLAM3 编译需要支持 C++17 的编译器、OpenCV 4.4 或更新版本、Eigen3、Boost Serialization、OpenSSL 和 Pangolin。DBoW2 与 g2o 已放在 `ORB_SLAM3/Thirdparty`。上游背景参见 [ORB-SLAM3 文档](ORB_SLAM3/README.md)；编译本仓库的 ROS 2 封装请使用这里的 `build_ros.sh`。
 
@@ -49,7 +39,7 @@ cd ORB_SLAM3
 cd ..
 ```
 
-`build_ros.sh` 先编译 ORB-SLAM3 核心，再通过 `colcon` 编译 `orb_slam3` 封装和 `slam_bench_msgs`。启动脚本需要 `ORB_SLAM3/Vocabulary/ORBvoc.txt`。若该文件不存在，请在启动前从附带的压缩包解压：
+`build_ros.sh` 会先编译附带的 Pangolin、ORB-SLAM3 核心及其 DBoW2/g2o 库，再通过 `colcon` 编译 `orb_slam3` 封装和 `slam_bench_msgs`。启动脚本需要 `ORB_SLAM3/Vocabulary/ORBvoc.txt`。若该文件不存在，请在启动前从附带的压缩包解压：
 
 ```bash
 tar -xf ORB_SLAM3/Vocabulary/ORBvoc.txt.tar.gz -C ORB_SLAM3/Vocabulary

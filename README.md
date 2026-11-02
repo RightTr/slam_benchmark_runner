@@ -21,21 +21,11 @@ Install the native build dependencies used by this repository's ORB-SLAM3 CMake 
 sudo apt update
 sudo apt install build-essential cmake git python3-colcon-common-extensions \
   libopencv-dev libeigen3-dev libboost-serialization-dev libssl-dev \
-  libsodium23 libzstd1
+  libsodium23 libzstd1 libgl1-mesa-dev libegl1-mesa-dev \
+  libepoxy-dev libglew-dev libx11-dev pkg-config
 ```
 
-ORB-SLAM3 also needs **Pangolin** for its viewer. If Pangolin is not installed, build and install it using the [Pangolin project instructions](https://github.com/stevenlovegrove/Pangolin/blob/master/README.md):
-
-```bash
-git clone --recursive https://github.com/stevenlovegrove/Pangolin.git
-cd Pangolin
-./scripts/install_prerequisites.sh recommended
-cmake -S . -B build
-cmake --build build --parallel 4
-sudo cmake --install build
-sudo ldconfig
-cd ..
-```
+ORB-SLAM3 also needs **Pangolin** for its viewer. This repository includes Pangolin v0.9.6 under `ORB_SLAM3/Thirdparty/Pangolin`; `build_ros.sh` builds it into the workspace's `build/pangolin_install` directory automatically. No separate Pangolin clone or system-wide installation is needed. Its optional Python and vcpkg submodules are not used by this C++ benchmark; see the [vendored source note](ORB_SLAM3/Thirdparty/Pangolin/VENDORED_FROM.md) and [Pangolin's documentation](https://github.com/stevenlovegrove/Pangolin/blob/master/README.md).
 
 Pangolin opens a graphical viewer, so run the benchmark in a desktop session with a working OpenGL display. This repository's ORB-SLAM3 build requires a C++17 compiler, OpenCV 4.4 or newer, Eigen3, Boost Serialization, OpenSSL, and Pangolin. DBoW2 and g2o are included under `ORB_SLAM3/Thirdparty`. See the [upstream ORB-SLAM3 documentation](ORB_SLAM3/README.md) for background; use this repository's `build_ros.sh` for its ROS 2 wrapper.
 
@@ -49,7 +39,7 @@ cd ORB_SLAM3
 cd ..
 ```
 
-`build_ros.sh` builds the ORB-SLAM3 core, then builds the `orb_slam3` wrapper and `slam_bench_msgs` with `colcon`. The launcher expects `ORB_SLAM3/Vocabulary/ORBvoc.txt`. If that file is missing, extract it from the included archive before launching:
+`build_ros.sh` builds the bundled Pangolin, the ORB-SLAM3 core and its included DBoW2/g2o libraries, then builds the `orb_slam3` wrapper and `slam_bench_msgs` with `colcon`. The launcher expects `ORB_SLAM3/Vocabulary/ORBvoc.txt`. If that file is missing, extract it from the included archive before launching:
 
 ```bash
 tar -xf ORB_SLAM3/Vocabulary/ORBvoc.txt.tar.gz -C ORB_SLAM3/Vocabulary
