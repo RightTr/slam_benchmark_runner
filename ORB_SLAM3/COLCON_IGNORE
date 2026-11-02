@@ -1,0 +1,1 @@
+The native ORB-SLAM3 tree is built by build_ros.sh; the ROS 2 package is exposed at the repository root.

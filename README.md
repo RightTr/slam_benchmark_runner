@@ -45,14 +45,13 @@ cd ..
 tar -xf ORB_SLAM3/Vocabulary/ORBvoc.txt.tar.gz -C ORB_SLAM3/Vocabulary
 ```
 
-Build the public benchmark runner against the supplied libraries. Run these commands from the repository root after `build_ros.sh` has finished:
+After `build_ros.sh` finishes, build the workspace from the repository root. The workspace discovers the ROS 2 wrapper, benchmark messages, and public runner as three packages:
 
 ```bash
 cd ../..
 source /opt/ros/humble/setup.bash
 source install/setup.bash
-colcon build --base-paths src/slam_benchmark_runner/slam_bench_runner \
-  --packages-select slam_bench_runner
+colcon build
 source install/setup.bash
 cd src/slam_benchmark_runner
 ```

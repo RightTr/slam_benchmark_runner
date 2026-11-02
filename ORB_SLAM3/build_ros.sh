@@ -43,7 +43,7 @@ source "$setup_file"
 set -u
 cd "$workspace_root"
 colcon build \
-  --base-paths "$core_root/Examples_ROS" "$repo_root/../slam_bench_msgs" \
+  --base-paths "$repo_root/../orb_slam3" "$repo_root/../slam_bench_msgs" \
   --packages-up-to orb_slam3 \
   --cmake-args -DORB_SLAM3_ROOT="$core_root" -DORB_SLAM3_BUILD_ROOT="$core_build" \
   "${pangolin_args[@]}"

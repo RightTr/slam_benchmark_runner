@@ -45,14 +45,13 @@ cd ..
 tar -xf ORB_SLAM3/Vocabulary/ORBvoc.txt.tar.gz -C ORB_SLAM3/Vocabulary
 ```
 
-完成 `build_ros.sh` 后，在本仓库根目录执行以下命令，用附带的库编译公开评测入口：
+完成 `build_ros.sh` 后，在本仓库根目录构建工作区。工作区会识别 ROS 2 封装、评测消息和公开评测入口三个包：
 
 ```bash
 cd ../..
 source /opt/ros/humble/setup.bash
 source install/setup.bash
-colcon build --base-paths src/slam_benchmark_runner/slam_bench_runner \
-  --packages-select slam_bench_runner
+colcon build
 source install/setup.bash
 cd src/slam_benchmark_runner
 ```
