@@ -69,7 +69,8 @@ fi
 mkdir -p "$OUTPUT_DIR"
 cd "$WORKSPACE_ROOT"
 
-ORB_LOG="$OUTPUT_DIR/orbslam3_launch.log"
+# Preserve diagnostics from earlier runs, especially a failed finalization.
+ORB_LOG="$OUTPUT_DIR/orbslam3_launch_$(date +%Y-%m-%d_%H-%M-%S)_$$.log"
 setsid ros2 launch orb_slam3 rgbd.launch.py \
   vocabulary:="src/slam_benchmark_runner/ORB_SLAM3/Vocabulary/ORBvoc.txt" \
   >"$ORB_LOG" 2>&1 &

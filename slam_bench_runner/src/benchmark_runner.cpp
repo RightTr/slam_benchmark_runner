@@ -559,6 +559,7 @@ class Runner final : public rclcpp::Node {
         else fs::remove(temporary);
       }
     } catch (const std::exception& e) {
+      std::cerr << "Session failed: " << e.what() << std::endl;
       core_.cancelSession();
       {
         std::lock_guard<std::mutex> lock(mu_);

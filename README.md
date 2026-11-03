@@ -78,6 +78,6 @@ The SLAM node receives `/benchmark/rgb`, `/benchmark/depth`, `/benchmark/camera_
 
 ## Results and submission
 
-Results are written under `slam_bench_runs/test/` or `slam_bench_runs/eval/`. Each session includes `metrics.txt`, `trajectory_2d.png`, and `trajectory_3d.png`. Metrics include ATE RMSE, translational RTE RMSE, rotational RPE RMSE, and tracking ratio. The ORB-SLAM3 launch log is `slam_bench_runs/orbslam3_launch.log`.
+Results are written under `slam_bench_runs/test/` or `slam_bench_runs/eval/`. Each session includes `metrics.txt`, `trajectory_2d.png`, and `trajectory_3d.png`. Metrics include ATE RMSE, translational RTE RMSE, rotational RPE RMSE, and tracking ratio. Each launch keeps its own `slam_bench_runs/orbslam3_launch_<time>_<pid>.log`; the launcher prints its exact path.
 
 After all six Evaluation sessions complete, submit the generated `submission_<student_id>.bin` from that evaluation run's directory. The launcher uses the supplied `key/teacher_public.key` to encrypt the BIN; no separate dataset decryption key file is needed at runtime.

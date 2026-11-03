@@ -1148,6 +1148,8 @@ void LocalMapping::RequestFinish()
 {
     unique_lock<mutex> lock(mMutexFinish);
     mbFinishRequested = true;
+    // Let an in-flight local bundle adjustment reach its normal abort point.
+    mbAbortBA = true;
 }
 
 bool LocalMapping::CheckFinish()

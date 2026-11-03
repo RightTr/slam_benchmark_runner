@@ -78,6 +78,6 @@ SLAM 节点接收 `/benchmark/rgb`、`/benchmark/depth`、`/benchmark/camera_inf
 
 ## 结果与提交
 
-结果保存在 `slam_bench_runs/test/` 或 `slam_bench_runs/eval/` 下。每次运行包含 `metrics.txt`、`trajectory_2d.png` 和 `trajectory_3d.png`。指标包括 ATE 均方根误差、平移 RTE 均方根误差、旋转 RPE 均方根误差及跟踪率。ORB-SLAM3 启动日志位于 `slam_bench_runs/orbslam3_launch.log`。
+结果保存在 `slam_bench_runs/test/` 或 `slam_bench_runs/eval/` 下。每次运行包含 `metrics.txt`、`trajectory_2d.png` 和 `trajectory_3d.png`。指标包括 ATE 均方根误差、平移 RTE 均方根误差、旋转 RPE 均方根误差及跟踪率。每次 ORB-SLAM3 启动日志单独保存在 `slam_bench_runs/orbslam3_launch_<时间>_<进程号>.log`，启动时也会打印具体路径。
 
 评估模式的六次运行全部完成后，提交该次评估目录下生成的 `submission_<student_id>.bin`。启动脚本使用随项目提供的 `key/teacher_public.key` 加密 BIN；运行时无需单独提供数据集解密密钥文件。

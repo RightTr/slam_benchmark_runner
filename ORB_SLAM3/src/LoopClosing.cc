@@ -1187,14 +1187,17 @@ void LoopClosing::CorrectLoop()
     mpCurrentKF->AddLoopEdge(mpLoopMatchedKF);
 
     // Launch a new thread to perform Global Bundle Adjustment (Only if few keyframes, if not it would take too much time)
-    if(!pLoopMap->isImuInitialized() || (pLoopMap->KeyFramesInMap()<200 && mpAtlas->CountMaps()==1))
     {
-        mbRunningGBA = true;
-        mbFinishedGBA = false;
-        mbStopGBA = false;
-        mnCorrectionGBA = mnNumCorrection;
-
-        mpThreadGBA = new thread(&LoopClosing::RunGlobalBundleAdjustment, this, pLoopMap, mpCurrentKF->mnId);
+        unique_lock<mutex> finish_lock(mMutexFinish);
+        if(!mbFinishRequested && (!pLoopMap->isImuInitialized() ||
+            (pLoopMap->KeyFramesInMap()<200 && mpAtlas->CountMaps()==1)))
+        {
+            mbRunningGBA = true;
+            mbFinishedGBA = false;
+            mbStopGBA = false;
+            mnCorrectionGBA = mnNumCorrection;
+            mpThreadGBA = new thread(&LoopClosing::RunGlobalBundleAdjustment, this, pLoopMap, mpCurrentKF->mnId);
+        }
     }
 
     // Loop closed. Release Local Mapping.
@@ -1742,13 +1745,17 @@ void LoopClosing::MergeLocal()
 
     mpLocalMapper->Release();
 
-    if(bRelaunchBA && (!pCurrentMap->isImuInitialized() || (pCurrentMap->KeyFramesInMap()<200 && mpAtlas->CountMaps()==1)))
     {
-        // Launch a new thread to perform Global Bundle Adjustment
-        mbRunningGBA = true;
-        mbFinishedGBA = false;
-        mbStopGBA = false;
-        mpThreadGBA = new thread(&LoopClosing::RunGlobalBundleAdjustment,this, pMergeMap, mpCurrentKF->mnId);
+        unique_lock<mutex> finish_lock(mMutexFinish);
+        if(!mbFinishRequested && bRelaunchBA && (!pCurrentMap->isImuInitialized() ||
+            (pCurrentMap->KeyFramesInMap()<200 && mpAtlas->CountMaps()==1)))
+        {
+            // Launch a new thread to perform Global Bundle Adjustment
+            mbRunningGBA = true;
+            mbFinishedGBA = false;
+            mbStopGBA = false;
+            mpThreadGBA = new thread(&LoopClosing::RunGlobalBundleAdjustment,this, pMergeMap, mpCurrentKF->mnId);
+        }
     }
 
     mpMergeMatchedKF->AddMergeEdge(mpCurrentKF);
@@ -2486,8 +2493,12 @@ void LoopClosing::RunGlobalBundleAdjustment(Map* pActiveMap, unsigned long nLoop
 void LoopClosing::RequestFinish()
 {
     unique_lock<mutex> lock(mMutexFinish);
-    // cout << "LC: Finish requested" << endl;
     mbFinishRequested = true;
+    // A loop detected near the last frame can leave global BA running for a
+    // long time. Its optimizer observes this flag and exits before Shutdown
+    // waits for the worker. Keep the GBA thread alive until it has finished.
+    unique_lock<mutex> gba_lock(mMutexGBA);
+    mbStopGBA = true;
 }
 
 void LoopClosing::StopGlobalBundleAdjustment()
